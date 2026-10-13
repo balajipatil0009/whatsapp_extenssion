@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>WA Auto Reply</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <h1>WA Auto Reply</h1>
+    <div id="status" class="status">Checking…</div>
+  </header>
+
+  <label class="switch-row">
+    <span>Auto-reply</span>
+    <input type="checkbox" id="enabled" />
+  </label>
+
+  <label class="switch-row">
+    <span>Also reply in groups</span>
+    <input type="checkbox" id="replyToGroups" />
+  </label>
+
+  <label class="field">
+    <span>Reply message</span>
+    <textarea id="replyText" rows="4" maxlength="500" placeholder="Type your auto-reply…"></textarea>
+  </label>
+
+  <button id="openLogs" class="logs-btn">📋 Open diagnostic logs</button>
+
+  <div class="hint">
+    Uses WhatsApp's own API (wa-js) inside the WhatsApp Web tab. If anything
+    fails, the Logs page shows exactly what broke.
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

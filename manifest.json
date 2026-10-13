@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "WA Auto Reply",
+  "version": "1.0.0",
+  "description": "Auto-replies to incoming WhatsApp Web messages using WhatsApp's own API (wa-js). Includes a full diagnostic log viewer.",
+  "permissions": ["storage", "tabs", "scripting"],
+  "host_permissions": ["https://web.whatsapp.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["vendor/wppconnect-wa.js", "content/wa-main.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["content/wa-bridge.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "WA Auto Reply"
+  }
+}

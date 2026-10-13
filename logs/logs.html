@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>WA Auto Reply — Logs</title>
+  <link rel="stylesheet" href="logs.css" />
+</head>
+<body>
+  <header>
+    <h1>WA Auto Reply — Diagnostic Logs</h1>
+    <div class="controls">
+      <select id="levelFilter">
+        <option value="all">All levels</option>
+        <option value="error">Errors</option>
+        <option value="warn">Warnings</option>
+        <option value="info">Info</option>
+      </select>
+      <select id="tagFilter">
+        <option value="all">All tags</option>
+      </select>
+      <input type="text" id="search" placeholder="Search text…" />
+      <button id="refresh">Refresh</button>
+      <button id="copy">Copy all (filtered)</button>
+      <button id="clear" class="danger">Clear logs</button>
+      <label class="live"><input type="checkbox" id="live" checked /> Live</label>
+    </div>
+    <div id="stats" class="stats">No logs yet.</div>
+  </header>
+  <main><pre id="logs"></pre></main>
+  <script src="logs.js"></script>
+</body>
+</html>
