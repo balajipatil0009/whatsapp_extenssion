@@ -1,24 +1,18 @@
-/* WA Auto Reply — MAIN world script (runs in the WhatsApp Web page itself)
+/* WA Auto Reply — MAIN world script (runs inside the WhatsApp Web page)
  *
- * Uses WhatsApp's own API exposed by wa-js (@wppconnect/wa-js, vendor/wppconnect-wa.js):
- *   - WPP.chat.on('chat.new_message')  → real incoming-message events
- *   - WPP.chat.sendTextMessage()       → protocol-level sending
+ * Responsibilities:
+ *   - subscribe to WPP.chat 'chat.new_message' and normalise the event
+ *   - resolve chat metadata (name, group / community / channel)
+ *   - hand the event to the background orchestrator through the bridge
+ *   - run the outbound queue: human delay, read receipt, "typing…" presence,
+ *     serialized sends, retries, and ack reporting
  *
- * This script has no access to chrome.* APIs, so it talks to the ISOLATED
- * bridge (content/wa-bridge.js) via window CustomEvents:
- *   bridge → main:  'wa2-settings'             (detail: settings object)
- *                   'wa2-bridge-request'       (detail: { reqId, type })
- *   main → bridge:  'wa2-log'                  (detail: { level, tag, message })
- *                   'wa2-status'               (detail: { mainReady, engine, ... })
- *                   'wa2-bridge-response'      (detail: { reqId, result })
- *                   'wa2-request-settings'     (main asks bridge to re-send settings)
+ * It has no chrome.* access; the ISOLATED bridge relays CustomEvents.
  */
 
 (() => {
   'use strict';
 
-  // Dedup guard — the background also injects these files as a fallback,
-  // so bail out if we already ran once in this page.
   if (window.__WA2__) return;
   window.__WA2__ = true;
 
@@ -27,62 +21,77 @@
     const line = `[WA2][${tag}] ${message}`;
     if (level === 'error') console.error(line);
     else if (level === 'warn') console.warn(line);
-    else console.log(line);
-    window.dispatchEvent(
-      new CustomEvent('wa2-log', { detail: { level, tag, message: String(message) } })
-    );
+    else console.info(line);
+    send('wa2-log', { level, tag, message: String(message) });
   }
 
-  // Surface page crashes into the log channel too.
+  function send(name, payload) {
+    try {
+      window.dispatchEvent(new CustomEvent(name, { detail: JSON.stringify(payload) }));
+    } catch (e) {
+      console.warn('[WA2] dispatch failed', name, e);
+    }
+  }
+
+  function parseDetail(detail) {
+    if (typeof detail !== 'string') return detail || {};
+    try {
+      return JSON.parse(detail);
+    } catch {
+      return {};
+    }
+  }
+
   window.addEventListener('error', (e) => log('error', 'page', `Uncaught: ${e.message}`));
-  window.addEventListener('unhandledrejection', (e) =>
-    log('error', 'page', `Unhandled rejection: ${e.reason}`)
-  );
+  window.addEventListener('unhandledrejection', (e) => log('error', 'page', `Unhandled rejection: ${e.reason}`));
 
   // -------------------------------------------------------------- settings
   const DEFAULT_SETTINGS = {
     enabled: false,
-    replyText: 'Thanks for your message! I will get back to you soon.',
-    replyToGroups: false,
-    minRetryMs: 3000,
+    replyMode: 'fixed',
+    typingSimulation: true,
+    typingCps: 14,
+    markSeen: true,
+    minGapBetweenSendsMs: 2000,
   };
   let settings = { ...DEFAULT_SETTINGS };
+  let bridgeSeen = false;
 
   window.addEventListener('wa2-settings', (e) => {
-    settings = { ...DEFAULT_SETTINGS, ...e.detail };
-    log('info', 'main', `Settings received: enabled=${settings.enabled}`);
+    bridgeSeen = true;
+    const detail = parseDetail(e.detail);
+    const wasEnabled = settings.enabled;
+    settings = { ...DEFAULT_SETTINGS, ...(detail || {}) };
+    // Turning the master switch off should not still send a queued reply.
+    if (wasEnabled && !settings.enabled) cancelQueued(null);
     pushStatus();
   });
 
-  // Ask the bridge to (re)push settings — covers the case where the bridge
-  // pushed settings *before* this listener was registered.
+  // Bridge may have pushed settings before this listener existed.
   window.dispatchEvent(new CustomEvent('wa2-request-settings'));
 
   // -------------------------------------------------------------- state
   let wppReady = false;
   let hookInstalled = false;
-  const sentIds = new Set();
-  const lastReplyAt = new Map();
+  const metaCache = new Map(); // chatId -> { meta, at }
+  const queuedTasks = new Set();
+  const seenIncoming = new Set();
+  let lastSendAt = 0;
 
   function pushStatus() {
-    window.dispatchEvent(
-      new CustomEvent('wa2-status', {
-        detail: {
-          mainReady: wppReady,
-          engine: 'wa-js',
-          enabled: settings.enabled,
-          hookInstalled,
-          wppVersion: window.WPP?.version || null,
-        },
-      })
-    );
+    send('wa2-status', {
+      mainReady: wppReady,
+      engine: 'wa-js',
+      enabled: settings.enabled,
+      hookInstalled,
+      wppVersion: window.WPP?.version || null,
+      queueCount: queue.filter((q) => q.status === 'pending' || q.status === 'sending').length,
+      replyMode: settings.replyMode,
+      bridgeSeen,
+    });
   }
 
-  // -------------------------------------------------------------- WPP setup
-  /**
-   * Poll for window.WPP forever, logging a heartbeat every 10 s so the Logs
-   * page always shows whether/much wait we've been through.
-   */
+  // -------------------------------------------------------------- WPP boot
   function waitForWpp() {
     return new Promise((resolve) => {
       const started = Date.now();
@@ -96,7 +105,7 @@
         const waited = (Date.now() - started) / 1000;
         if (waited - lastBeat >= 10) {
           lastBeat = waited;
-          log('warn', 'main', `Still waiting for window.WPP… ${waited.toFixed(0)}s (wa-js may not have booted against this WhatsApp Web version)`);
+          log('warn', 'main', `Still waiting for window.WPP… ${waited.toFixed(0)}s (wa-js may not support this WhatsApp Web build)`);
           pushStatus();
         }
       }, 1000);
@@ -108,24 +117,20 @@
     pushStatus();
     try {
       const WPP = await waitForWpp();
-      log('info', 'main', `wa-js loaded (WPP version: ${WPP.version || 'unknown'})`);
-
-      // Hook messages IMMEDIATELY — don't gate subscription on conn.main_ready.
-      // The event may fire before we subscribe; the reply path guards on readiness.
+      log('info', 'main', `wa-js loaded (WPP v${WPP.version || '?'})`);
       installHook(WPP);
 
-      // Wait for main readiness via BOTH the event and a 2s poll — the event
-      // can be missed, and isMainReady() flips true slightly later.
       let ready = false;
-      try { ready = WPP.isMainReady?.() || WPP.isFullReady?.() || false; } catch (e) {
+      try {
+        ready = WPP.isMainReady?.() || WPP.isFullReady?.() || false;
+      } catch (e) {
         log('warn', 'main', `isMainReady() threw: ${e?.message || e}`);
       }
-      if (ready) {
-        markMainReady();
-      } else {
+      if (ready) markMainReady();
+      else {
         log('info', 'main', 'Waiting for WhatsApp main connection (event + 2s polling)…');
         WPP.on?.('conn.main_ready', () => markMainReady());
-        waitForMainReady(WPP);
+        pollMainReady(WPP);
       }
     } catch (err) {
       log('error', 'main', `Boot failed: ${err?.message || err}`);
@@ -136,18 +141,11 @@
   function installHook(WPP) {
     if (hookInstalled) return;
     hookInstalled = true;
-    // Some wa-js builds expose WPP.chat.on; others use global WPP.on.
     const on = WPP.chat?.on?.bind(WPP.chat) || WPP.on.bind(WPP);
     on('chat.new_message', (msg) => {
-      try {
-        handleNewMessage(msg).catch((e) =>
-          log('error', 'reply', `Handler error: ${e?.message || e}`)
-        );
-      } catch (e) {
-        log('error', 'reply', `Event dispatch error: ${e?.message || e}`);
-      }
+      handleNewMessage(msg).catch((e) => log('error', 'incoming', `Handler error: ${e?.message || e}`));
     });
-    log('info', 'main', "Subscribed to 'chat.new_message' events (pre or post main_ready)");
+    log('info', 'main', "Subscribed to 'chat.new_message'");
     pushStatus();
   }
 
@@ -158,40 +156,47 @@
     pushStatus();
   }
 
-  function waitForMainReady(WPP) {
+  function pollMainReady(WPP) {
     let tries = 0;
     const iv = setInterval(() => {
       tries += 1;
-      if (wppReady) { clearInterval(iv); return; }
+      if (wppReady) {
+        clearInterval(iv);
+        return;
+      }
       let ready = false;
-      try { ready = WPP.isMainReady?.() || WPP.isFullReady?.() || false; } catch (e) {
+      try {
+        ready = WPP.isMainReady?.() || WPP.isFullReady?.() || false;
+      } catch {
         ready = false;
       }
-      if (ready) { clearInterval(iv); markMainReady(); return; }
-      // Heartbeat every ~16 s so the Logs page shows we're alive and how long.
+      if (ready) {
+        clearInterval(iv);
+        markMainReady();
+        return;
+      }
       if (tries % 8 === 0) {
-        log('info', 'main', `heartbeat: main_ready still false after ${tries * 2}s (isMainReady=${ready})`);
+        log('info', 'main', `heartbeat: main_ready still false after ${tries * 2}s`);
         pushStatus();
       }
     }, 2000);
   }
 
-  // -------------------------------------------------------------- reply logic
-  /** Normalize WhatsApp ids (WID objects, Chat models, strings) to 'user@c.us' strings. */
+  // -------------------------------------------------------------- message ids
   function serializedValue(v) {
     if (!v) return null;
     if (typeof v === 'string') return v.includes('@') ? v : null;
+    if (typeof v === 'number') return null;
     if (typeof v === 'object') {
       if (typeof v._serialized === 'string' && v._serialized.includes('@')) return v._serialized;
       if (v.user != null && typeof v.server === 'string') return `${v.user}@${v.server}`;
-      return serializedValue(v.id);
+      if (v.id) return serializedValue(v.id);
     }
     return null;
   }
 
-  /** Resolve which chat a message belongs to — wa-js models differ from what the docs suggest. */
   function getChatId(msg) {
-    for (const cand of [msg?.chatId, msg?.chatWid, msg?.chat, msg?.chat?.id, msg?.from, msg?.from?.id]) {
+    for (const cand of [msg?.chatId, msg?.chatWid, msg?.chat?.id, msg?.chat, msg?.from, msg?.from?.id]) {
       const s = serializedValue(cand);
       if (s) return s;
     }
@@ -199,106 +204,407 @@
   }
 
   function msgIdOf(msg) {
-    return serializedValue(msg?.id) || (msg?.t != null ? String(msg.t) : String(Date.now()));
+    const serialized = serializedValue(msg?.id);
+    if (serialized) {
+      // wa-js serialises MsgKey as "<fromMe>_<chat>_<messageId>". Keep only the
+      // stable message id so the same event with/without _serialized maps to a
+      // single dedupe key (a mismatch here used to allow a second reply).
+      const tail = serialized.match(/_([^_]+)$/);
+      return tail ? tail[1] : serialized;
+    }
+    if (msg?.id && msg.id.id) return String(msg.id.id);
+    if (msg?.t != null) return `t${msg.t}`;
+    return `local_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   }
 
-  function safeDump(v) {
-    try { return JSON.stringify(v ?? null); } catch { return '[unserializable]'; }
+  function isFromMe(msg) {
+    if (!msg) return false;
+    if (msg.id && msg.id.fromMe === true) return true;
+    if (msg.fromMe === true) return true;
+    const self = msg.self;
+    return self === 'out' || self === true || self === 1 || String(self || '').includes('out');
   }
 
+  const IGNORED_TYPES = new Set([
+    'e2e_notification',
+    'notification',
+    'notification_template',
+    'gp2',
+    'protocol',
+    'revoked',
+    'call_log',
+    'ciphertext',
+    'order',
+  ]);
+
+  // -------------------------------------------------------------- chat metadata
+  function fallbackKind(chatId) {
+    if (chatId === 'status@broadcast' || (chatId.endsWith('@broadcast') && chatId.includes('status'))) return 'status';
+    if (chatId.endsWith('@g.us')) return 'group';
+    if (chatId.endsWith('@newsletter')) return 'newsletter';
+    if (chatId.endsWith('@broadcast')) return 'broadcast';
+    return chatId ? 'contact' : 'unknown';
+  }
+
+  function kindFromModel(model, chatId) {
+    const base = fallbackKind(chatId);
+    if (base !== 'group' || !model) return base;
+    try {
+      const gm = model.groupMetadata || null;
+      return model.isParentGroup === true || (gm && (gm.groupType === 'COMMUNITY' || gm.parentGroup))
+        ? 'community'
+        : 'group';
+    } catch {
+      return base;
+    }
+  }
+
+  async function lookupChat(chatId) {
+    const cached = metaCache.get(chatId);
+    if (cached && Date.now() - cached.at < 5 * 60_000) return cached.meta;
+    let kind = fallbackKind(chatId);
+    let name = '';
+    try {
+      if (typeof window.WPP?.chat?.get === 'function') {
+        const model = await Promise.resolve(window.WPP.chat.get(chatId));
+        if (model) {
+          name = model.name || model.formattedTitle || model.pushname || '';
+          kind = kindFromModel(model, chatId);
+        }
+      }
+    } catch (e) {
+      log('warn', 'conv', `chat.get(${chatId}) failed: ${e?.message || e}`);
+    }
+    const meta = { id: chatId, name, kind };
+    metaCache.set(chatId, { meta, at: Date.now() });
+    if (metaCache.size > 300) metaCache.delete(metaCache.keys().next().value);
+    return meta;
+  }
+
+  // -------------------------------------------------------------- incoming
   async function handleNewMessage(msg) {
     const chatId = getChatId(msg);
-    const bodyText = msg?.body || msg?.text || '';
+    const body = String(msg?.body || msg?.caption || '');
+    const type = String(msg?.type || 'chat');
+    if (!chatId) {
+      log('error', 'incoming', `Could not resolve a chat id (keys: ${msg ? Object.keys(msg).join(',') : 'null'})`);
+      return;
+    }
+    if (IGNORED_TYPES.has(type)) return;
+
+    // De-duplicate at the page too: wa-js can emit the same message more than
+    // once (reconnect/ack transitions) and two AI jobs would both answer it.
+    const msgId = msgIdOf(msg);
+    const dedupeKey = `${chatId}|${msgId}`;
+    if (seenIncoming.has(dedupeKey)) {
+      log('info', 'incoming', `Duplicate event for ${dedupeKey} — ignored`);
+      return;
+    }
+    seenIncoming.add(dedupeKey);
+    if (seenIncoming.size > 500) seenIncoming.delete(seenIncoming.values().next().value);
+
+    const meta = await lookupChat(chatId);
+    const event = {
+      chatId,
+      msgId,
+      body,
+      fromMe: isFromMe(msg),
+      kind: meta.kind,
+      chatName: meta.name || msg?.notifyName || '',
+      notifyName: msg?.notifyName || msg?.sender?.pushname || '',
+      ts: msg?.t ? msg.t * 1000 : Date.now(),
+      type,
+    };
+
     log(
       'info',
       'incoming',
-      `Message from ${serializedValue(msg?.from) || '?'} chat=${chatId || 'UNRESOLVED'} self=${msg?.self} group=${(chatId || '').endsWith('@g.us')}: "${cut(bodyText)}"`
+      `${event.fromMe ? 'OUT' : 'IN'} ${event.chatId} [${event.kind}] ${event.chatName || ''}: "${cut(body, 70)}"`
     );
+    send('wa2-incoming', { event });
+    pushStatus();
+  }
 
-    if (!chatId) {
-      log('error', 'reply', `Could not resolve chat id from event — NOT replying. msg keys=[${msg ? Object.keys(msg).join(',') : 'null'}] id=${safeDump(msg?.id)} chat=${safeDump(msg?.chat)} from=${safeDump(msg?.from)}`);
+  function cut(text, max) {
+    const t = String(text || '');
+    return t.length > max ? t.slice(0, max) + '…' : t;
+  }
+
+  // -------------------------------------------------------------- outbound queue
+  // { taskId, chatId, chatName, text, dueAt, status, attempts, typing, markSeen, provider, via }
+  const queue = [];
+  let pumping = false;
+  let pumpTimer = null;
+  let queueStateTimer = null;
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
+  const randomBetween = (a, b) => Math.min(a, b) + Math.random() * Math.abs(b - a);
+
+  function typingDurationFor(text) {
+    const cps = Math.max(1, Number(settings.typingCps) || 14);
+    const raw = (String(text || '').length / cps) * 1000;
+    return Math.round(Math.min(12_000, Math.max(1_200, raw)));
+  }
+
+  function enqueueReply(detail) {
+    if (!detail || !detail.taskId || !detail.chatId || !detail.text) {
+      log('warn', 'queue', `Ignored malformed reply task: ${JSON.stringify(detail || {}).slice(0, 200)}`);
       return;
+    }
+    if (queuedTasks.has(detail.taskId)) return;
+    queuedTasks.add(detail.taskId);
+    if (queuedTasks.size > 500) queuedTasks.delete(queuedTasks.values().next().value);
+
+    const min = Number(detail.delayMinMs);
+    const max = Number(detail.delayMaxMs);
+    const lo = Number.isFinite(min) ? Math.max(0, min) : 2000;
+    const hi = Number.isFinite(max) ? Math.max(lo, max) : 7000;
+    const delay = Math.round(randomBetween(lo, hi));
+
+    const item = {
+      taskId: detail.taskId,
+      chatId: detail.chatId,
+      chatName: detail.chatName || '',
+      text: String(detail.text),
+      dueAt: Date.now() + delay,
+      status: 'pending',
+      attempts: 0,
+      typing: detail.typing !== false,
+      markSeen: detail.markSeen !== false,
+      provider: detail.provider || null,
+      via: detail.via || 'fixed',
+    };
+    queue.push(item);
+    log(
+      'info',
+      'queue',
+      `+ ${item.taskId} → ${item.chatName || item.chatId} in ${(delay / 1000).toFixed(1)}s ` +
+        `(${queue.length} pending, ${item.provider || item.via})`
+    );
+    pushStatus();
+    updateQueueState();
+    schedulePump();
+  }
+
+  function schedulePump() {
+    if (pumpTimer) {
+      clearTimeout(pumpTimer);
+      pumpTimer = null;
+    }
+    if (pumping || !queue.length) return;
+    const pending = queue.filter((q) => q.status === 'pending');
+    if (!pending.length) return;
+    const next = pending.reduce((a, b) => (a.dueAt <= b.dueAt ? a : b));
+    const wait = Math.max(0, next.dueAt - Date.now());
+    pumpTimer = setTimeout(() => {
+      pumpTimer = null;
+      pump();
+    }, Math.min(wait, 2_147_000_000));
+  }
+
+  async function pump() {
+    if (pumping) return;
+    pumping = true;
+    try {
+      for (;;) {
+        const now = Date.now();
+        const idx = queue.findIndex((q) => q.status === 'pending' && q.dueAt <= now);
+        if (idx === -1) break;
+        const item = queue[idx];
+        item.status = 'sending';
+        updateQueueState();
+        await sendItem(item);
+        // A failed send resets the item to 'pending' for one retry — keep it.
+        if (item.status !== 'sending') {
+          updateQueueState();
+          pushStatus();
+          schedulePump();
+          continue;
+        }
+        const at = queue.indexOf(item);
+        if (at !== -1) queue.splice(at, 1);
+        updateQueueState();
+        pushStatus();
+        schedulePump();
+      }
+    } catch (e) {
+      log('error', 'queue', `Pump crashed: ${e?.message || e}`);
+    } finally {
+      pumping = false;
+      schedulePump();
+    }
+  }
+
+  async function markSeen(chatId) {
+    try {
+      if (typeof window.WPP?.chat?.markIsRead === 'function') {
+        await window.WPP.chat.markIsRead(chatId);
+        log('info', 'presence', `Marked read: ${chatId}`);
+      }
+    } catch (e) {
+      log('warn', 'presence', `markIsRead failed for ${chatId}: ${e?.message || e}`);
+    }
+  }
+
+  async function startTyping(chatId, durationMs) {
+    try {
+      if (typeof window.WPP?.chat?.markIsComposing === 'function') {
+        await window.WPP.chat.markIsComposing(chatId, durationMs);
+        return true;
+      }
+    } catch (e) {
+      log('warn', 'presence', `typing failed for ${chatId}: ${e?.message || e}`);
+    }
+    return false;
+  }
+
+  async function stopTyping(chatId) {
+    try {
+      if (typeof window.WPP?.chat?.markIsPaused === 'function') {
+        await window.WPP.chat.markIsPaused(chatId);
+      }
+    } catch {
+      /* presence is cosmetic */
+    }
+  }
+
+  async function sendItem(item) {
+    const started = Date.now();
+    item.attempts += 1;
+
+    // Respect the global minimum gap between any two sends.
+    const gap = Math.max(0, Number(settings.minGapBetweenSendsMs) || 0);
+    const waitForGap = lastSendAt + gap - Date.now();
+    if (waitForGap > 0) await sleep(waitForGap);
+
+    if (item.markSeen && settings.markSeen) await markSeen(item.chatId);
+
+    if (item.typing && settings.typingSimulation) {
+      const typingMs = typingDurationFor(item.text);
+      const ok = await startTyping(item.chatId, typingMs + 1000);
+      if (ok) {
+        log('info', 'presence', `Typing… ${typingMs}ms → ${item.chatId}`);
+        await sleep(typingMs);
+        await stopTyping(item.chatId);
+      }
     }
 
-    if (!settings.enabled) {
-      log('info', 'reply', 'Auto-reply is OFF — skipping');
-      return;
-    }
-    if (!wppReady) {
-      log('warn', 'reply', 'WPP not ready yet — skipping');
-      return;
-    }
-    // Skip our own outgoing messages (self is 'out' or includes out flag).
-    if (msg?.self && String(msg.self).includes('out')) {
-      log('info', 'reply', 'Own outgoing message — skipping');
-      return;
-    }
-    // Skip groups unless allowed.
-    const isGroup = chatId.endsWith('@g.us');
-    if (isGroup && !settings.replyToGroups) {
-      log('info', 'reply', 'Group message — skipping (groups are off in settings)');
-      return;
-    }
-    const msgKey = `${chatId}:${msgIdOf(msg)}`;
-    if (sentIds.has(msgKey)) {
-      log('info', 'reply', `Already replied to ${msgKey} — skipping dup`);
-      return;
-    }
-    const now = Date.now();
-    const last = lastReplyAt.get(chatId) || 0;
-    if (now - last < settings.minRetryMs) {
-      log('info', 'reply', `Cooldown active for ${chatId} — skipping`);
-      sentIds.add(msgKey);
-      return;
-    }
-    sentIds.add(msgKey);
-    lastReplyAt.set(chatId, now);
-
-    // Small human-like jitter before sending.
-    const delay = Math.floor(Math.random() * 800) + 400; // 400–1200 ms
-    log('info', 'send', `Sending reply in ${delay}ms → ${chatId}`);
-    await new Promise((r) => setTimeout(r, delay));
+    // A short, human "hit send" hesitation.
+    await sleep(randomBetween(250, 900));
 
     try {
-      const result = await window.WPP.chat.sendTextMessage(chatId, settings.replyText);
-      log('info', 'send', `Reply sent ✔ → ${chatId} (send result: ${safeDump(result?.id) || 'ok'})`);
+      const result = await window.WPP.chat.sendTextMessage(item.chatId, item.text);
+      lastSendAt = Date.now();
+      const id = serializedValue(result?.id) || 'ok';
+      log('info', 'send', `✔ ${item.chatId} in ${Date.now() - started}ms (msg ${id})`);
+      send('wa2-sent', {
+        taskId: item.taskId,
+        chatId: item.chatId,
+        chatName: item.chatName,
+        text: item.text,
+        ok: true,
+        provider: item.provider,
+        via: item.via,
+        latencyMs: Date.now() - started,
+      });
     } catch (err) {
-      log('error', 'send', `Send failed → ${chatId}: ${err?.message || err}`);
-      // Allow a retry on a future message from the same chat.
-      sentIds.delete(msgKey);
-      lastReplyAt.delete(chatId);
-      throw err;
+      const message = err?.message || String(err);
+      if (item.attempts < 2) {
+        log('warn', 'send', `Send failed (${message}) — retrying once`);
+        await sleep(2000);
+        item.dueAt = Date.now();
+        item.status = 'pending';
+        pushStatus();
+        updateQueueState();
+        schedulePump();
+        return;
+      }
+      log('error', 'send', `✖ ${item.chatId}: ${message}`);
+      lastSendAt = Date.now();
+      send('wa2-sent', {
+        taskId: item.taskId,
+        chatId: item.chatId,
+        text: item.text,
+        ok: false,
+        error: message,
+        provider: item.provider,
+        via: item.via,
+      });
     }
   }
 
-  function cut(text) {
-    const t = String(text || '');
-    return t.length > 60 ? t.slice(0, 60) + '…' : t;
+  function cancelQueued(chatId) {
+    let removed = 0;
+    for (let i = queue.length - 1; i >= 0; i--) {
+      if (queue[i].status === 'pending' && (!chatId || queue[i].chatId === chatId)) {
+        queue.splice(i, 1);
+        removed += 1;
+      }
+    }
+    log('info', 'queue', `Cancelled ${removed} queued reply(ies)${chatId ? ` for ${chatId}` : ''}`);
+    updateQueueState();
+    pushStatus();
+    schedulePump();
   }
 
-  // -------------------------------------------------------------- ping handler
-  window.addEventListener('wa2-bridge-request', (e) => {
-    const { reqId, type } = e.detail || {};
-    if (type === 'ping') {
-      window.dispatchEvent(
-        new CustomEvent('wa2-bridge-response', {
-          detail: {
-            reqId,
-            result: {
-              ok: wppReady,
-              engine: 'wa-js',
-              mainReady: wppReady,
-              hookInstalled,
-              enabled: settings.enabled,
-              wppVersion: window.WPP?.version || null,
-              whatsappUrl: location.href.startsWith('https://web.whatsapp.com'),
-            },
-          },
-        })
-      );
-    }
+  function queueSnapshot() {
+    return {
+      items: queue
+        .filter((q) => q.status === 'pending' || q.status === 'sending')
+        .map((q) => ({
+          taskId: q.taskId,
+          chatId: q.chatId,
+          chatName: q.chatName,
+          text: q.text,
+          dueAt: q.dueAt,
+          status: q.status,
+          attempts: q.attempts,
+        })),
+      active: queue.find((q) => q.status === 'sending')?.taskId || null,
+    };
+  }
+
+  function updateQueueState() {
+    if (queueStateTimer) return;
+    queueStateTimer = setTimeout(() => {
+      queueStateTimer = null;
+      send('wa2-queue-state', { state: queueSnapshot() });
+    }, 300);
+  }
+
+  // -------------------------------------------------------------- bridge events
+  window.addEventListener('wa2-reply', (e) => {
+    enqueueReply(parseDetail(e.detail));
   });
 
+  window.addEventListener('wa2-cancel', (e) => {
+    const d = parseDetail(e.detail);
+    cancelQueued(d.chatId || null);
+  });
+
+  window.addEventListener('wa2-bridge-request', (e) => {
+    const { reqId, type } = e.detail || {};
+    if (type !== 'ping') return;
+    window.dispatchEvent(
+      new CustomEvent('wa2-bridge-response', {
+        detail: JSON.stringify({
+          reqId,
+          result: {
+            ok: wppReady,
+            engine: 'wa-js',
+            mainReady: wppReady,
+            hookInstalled,
+            enabled: settings.enabled,
+            wppVersion: window.WPP?.version || null,
+            queueCount: queue.length,
+          },
+        }),
+      })
+    );
+  });
+
+  // -------------------------------------------------------------- start
   pushStatus();
+  updateQueueState();
   boot();
 })();

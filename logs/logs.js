@@ -9,10 +9,11 @@ function fmtTime(t) {
 }
 
 function esc(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function renderLogs(logs) {
+  const nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 140;
   const level = $('levelFilter').value;
   const tag = $('tagFilter').value;
   const q = $('search').value.trim().toLowerCase();
@@ -37,6 +38,7 @@ function renderLogs(logs) {
   const counts = { error: 0, warn: 0, info: 0 };
   for (const l of logs) counts[l.level] = (counts[l.level] || 0) + 1;
   statsEl.textContent = `${logs.length} total — ${counts.error} errors, ${counts.warn} warnings, ${counts.info} info (${filtered.length} shown)`;
+  if (nearBottom) window.scrollTo(0, document.body.scrollHeight);
 }
 
 function rebuildTagFilter(logs) {
@@ -64,6 +66,9 @@ $('levelFilter').addEventListener('change', load);
 $('tagFilter').addEventListener('change', load);
 $('search').addEventListener('input', () => load());
 $('refresh').addEventListener('click', () => load());
+$('dashboard').addEventListener('click', () =>
+  chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html') })
+);
 $('clear').addEventListener('click', async () => {
   if (!confirm('Clear all logs?')) return;
   await chrome.storage.local.set({ logs: [] });

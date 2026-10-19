@@ -1,12 +1,30 @@
 {
   "manifest_version": 3,
   "name": "WA Auto Reply",
-  "version": "1.0.0",
-  "description": "Auto-replies to incoming WhatsApp Web messages using WhatsApp's own API (wa-js). Includes a full diagnostic log viewer.",
-  "permissions": ["storage", "tabs", "scripting"],
-  "host_permissions": ["https://web.whatsapp.com/*"],
+  "version": "2.1.0",
+  "description": "Auto-replies to WhatsApp Web messages with keyword bots, human-like delays, per-chat controls and a retained AI engine (configuration coming soon).",
+  "minimum_chrome_version": "111",
+  "permissions": ["storage", "tabs", "scripting", "alarms"],
+  "host_permissions": [
+    "https://web.whatsapp.com/*",
+    "https://gemini.google.com/*",
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://chat.deepseek.com/*",
+    "https://www.kimi.com/*",
+    "https://kimi.com/*",
+    "https://kimi.moonshot.cn/*"
+  ],
   "background": {
     "service_worker": "background.js"
+  },
+  "options_ui": {
+    "page": "dashboard/dashboard.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "WA Auto Reply"
   },
   "content_scripts": [
     {
@@ -17,13 +35,29 @@
     },
     {
       "matches": ["https://web.whatsapp.com/*"],
-      "js": ["content/wa-bridge.js"],
+      "js": ["lib/defaults.js", "content/wa-bridge.js"],
       "run_at": "document_start",
       "world": "ISOLATED"
+    },
+    {
+      "matches": ["https://gemini.google.com/*"],
+      "js": ["providers/driver.js", "providers/gemini.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+      "js": ["providers/driver.js", "providers/chatgpt.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://chat.deepseek.com/*"],
+      "js": ["providers/driver.js", "providers/deepseek.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.kimi.com/*", "https://kimi.com/*", "https://kimi.moonshot.cn/*"],
+      "js": ["providers/driver.js", "providers/kimi.js"],
+      "run_at": "document_idle"
     }
-  ],
-  "action": {
-    "default_popup": "popup/popup.html",
-    "default_title": "WA Auto Reply"
-  }
+  ]
 }

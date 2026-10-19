@@ -1,0 +1,10 @@
+{
+  "name": "wa-auto-reply",
+  "version": "2.1.0",
+  "private": true,
+  "description": "Chrome extension: human-paced WhatsApp Web auto-replies with keyword bots, per-chat controls, and a retained AI engine.",
+  "scripts": {
+    "test": "node --test-isolation=none --test tests/defaults.test.js tests/bots.test.js tests/policy.test.js tests/context.test.js tests/background.smoke.test.js",
+    "check": "node --check background.js && node --check content/wa-main.js && node --check content/wa-bridge.js && node --check lib/defaults.js && node --check lib/bots.js && node --check lib/policy.js && node --check lib/context.js && node --check providers/driver.js && node --check providers/gemini.js && node --check providers/chatgpt.js && node --check providers/deepseek.js && node --check providers/kimi.js && node --check dashboard/dashboard.js && node --check popup/popup.js && node --check logs/logs.js"
+  }
+}

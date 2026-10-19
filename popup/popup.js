@@ -1,66 +1,160 @@
-const enabledEl = document.getElementById('enabled');
-const groupsEl = document.getElementById('replyToGroups');
-const replyTextEl = document.getElementById('replyText');
-const statusEl = document.getElementById('status');
-const logsLink = document.getElementById('openLogs');
+/* WA Auto Reply — compact popup. Full control lives in the dashboard. */
+(() => {
+  'use strict';
 
-const DEFAULTS = {
-  enabled: false,
-  replyText: 'Thanks for your message! I will get back to you soon.',
-  replyToGroups: false,
-  minRetryMs: 3000,
-};
+  const { PROVIDERS, PROVIDER_IDS, providerById, normalizeSettings } = window.WA2;
+  const $ = (id) => document.getElementById(id);
+  let settings = normalizeSettings({});
 
-async function pingWhatsAppTab() {
-  try {
-    const tabs = await chrome.tabs.query({ url: 'https://web.whatsapp.com/*', active: true, currentWindow: true });
-    const tab = tabs[0] || (await chrome.tabs.query({ url: 'https://web.whatsapp.com/*' }))[0];
-    if (!tab) return { ok: false, reason: 'no-tab' };
-    const resp = await chrome.tabs.sendMessage(tab.id, { type: 'wa2:ping' });
-    return resp ?? { ok: false, reason: 'no-response' };
-  } catch {
-    return { ok: false, reason: 'no-response' };
+  function render() {
+    $('enabled').checked = settings.enabled;
+    $('replyText').value = settings.replyText;
+    $('replyToContacts').checked = settings.replyToContacts;
+    $('replyToGroups').checked = settings.replyToGroups;
+    $('replyToCommunities').checked = settings.replyToCommunities;
+    $('replyToNewsletters').checked = settings.replyToNewsletters;
+
+    const mode = settings.replyMode;
+    document.querySelectorAll('#modeSwitch button').forEach((b) => {
+      b.classList.toggle('active', b.dataset.mode === mode);
+      if (b.dataset.mode === 'ai') b.disabled = true; // configuration coming soon
+    });
+    $('fixedBox').hidden = mode !== 'fixed';
+    $('botBox').hidden = mode !== 'bot';
+    $('aiBox').hidden = mode !== 'ai';
+
+    const enabled = PROVIDER_IDS.filter((id) => settings.enabledProviders[id]);
+    const select = $('provider');
+    select.innerHTML =
+      '<option value="auto">Auto (round-robin)</option>' +
+      enabled.map((id) => `<option value="${id}">${providerById(id)?.label || id}</option>`).join('');
+    select.value = settings.aiProvider;
+
+    $('delayLine').textContent = `${(settings.replyDelayMinMs / 1000).toFixed(0)}–${(settings.replyDelayMaxMs / 1000).toFixed(0)}s delay`;
+    $('version').textContent = `v${chrome.runtime.getManifest().version}`;
   }
-}
 
-function renderStatus(state, enabled) {
-  if (!state.ok && state.reason === 'no-tab') {
-    statusEl.textContent = 'WhatsApp Web not open';
-    statusEl.className = 'status warn';
-  } else if (!state.ok) {
-    statusEl.textContent = state.reason === 'main-world-not-responding' ? 'WhatsApp not ready — see Logs' : 'Page not ready — see Logs';
-    statusEl.className = 'status warn';
-  } else if (state.mainReady) {
-    statusEl.textContent = "Listening ✓ (wa-js 'chat.new_message')";
-    statusEl.className = 'status ok';
-  } else {
-    statusEl.textContent = 'Waiting for WhatsApp to connect…';
-    statusEl.className = 'status warn';
+  async function refreshBots() {
+    const { bots = [] } = await chrome.storage.local.get({ bots: [] });
+    const list = Array.isArray(bots) ? bots : [];
+    const enabled = list.filter((b) => b.enabled !== false).length;
+    $('botSummary').textContent = list.length
+      ? `${enabled} of ${list.length} bot${list.length === 1 ? '' : 's'} enabled. One bot answers each message; keywords are configured in the dashboard.`
+      : 'No bots yet. Create your first keyword bot in the dashboard.';
   }
-  logsLink.textContent = '📋 Open diagnostic logs';
-}
 
-async function saveSettings() {
-  const settings = {
-    enabled: enabledEl.checked,
-    replyToGroups: groupsEl.checked,
-    replyText: replyTextEl.value.trim() || DEFAULTS.replyText,
-  };
-  await chrome.storage.sync.set(settings);
-}
+  async function save(patch) {
+    settings = normalizeSettings({ ...settings, ...patch });
+    await chrome.storage.sync.set(settings);
+    render();
+    refreshStatus();
+  }
 
-enabledEl.addEventListener('change', saveSettings);
-groupsEl.addEventListener('change', saveSettings);
-replyTextEl.addEventListener('blur', saveSettings);
-logsLink.addEventListener('click', () => {
-  chrome.tabs.create({ url: chrome.runtime.getURL('logs/logs.html') });
-});
+  async function refreshStatus() {
+    const statusEl = $('status');
+    let tabs = [];
+    try {
+      tabs = await chrome.tabs.query({ url: 'https://web.whatsapp.com/*' });
+    } catch {
+      tabs = [];
+    }
+    if (!tabs.length) {
+      statusEl.textContent = settings.enabled ? 'WhatsApp Web not open' : 'Off · WhatsApp Web not open';
+      statusEl.className = 'status warn';
+    } else {
+      try {
+        const res = await chrome.tabs.sendMessage(tabs[0].id, { type: 'wa2:ping' });
+        if (res && res.mainReady) {
+          statusEl.textContent = settings.enabled ? 'Listening ✓' : 'Off · connected';
+          statusEl.className = settings.enabled ? 'status ok' : 'status';
+        } else {
+          statusEl.textContent = 'Connecting…';
+          statusEl.className = 'status warn';
+        }
+      } catch {
+        statusEl.textContent = 'Reload WhatsApp Web tab';
+        statusEl.className = 'status bad';
+      }
+    }
 
-(async () => {
-  const settings = await chrome.storage.sync.get(DEFAULTS);
-  enabledEl.checked = settings.enabled;
-  groupsEl.checked = settings.replyToGroups;
-  replyTextEl.value = settings.replyText;
-  const state = await pingWhatsAppTab();
-  renderStatus(state, settings.enabled);
+    if (settings.replyMode === 'ai') {
+      let open = 0;
+      for (const p of PROVIDERS) {
+        if (!settings.enabledProviders[p.id]) continue;
+        try {
+          const t = await chrome.tabs.query({ url: p.matches });
+          if (t.length) open += 1;
+        } catch {
+          /* ignore */
+        }
+      }
+      $('providerHint').textContent = open
+        ? `${open} enabled provider tab${open > 1 ? 's' : ''} open.`
+        : 'No enabled provider tab is open.';
+    }
+  }
+
+  async function refreshQueue() {
+    const { queue = { items: [] } } = await chrome.storage.local.get({ queue: { items: [] } });
+    const n = (queue.items || []).length;
+    $('queueLine').textContent = `Queue: ${n} pending`;
+  }
+
+  function openDashboard(tab) {
+    chrome.tabs.create({ url: chrome.runtime.getURL(`dashboard/dashboard.html#${tab}`) });
+  }
+
+  // ---------------------------------------------------------------- events
+  $('enabled').addEventListener('change', (e) => save({ enabled: e.target.checked }));
+  $('replyToContacts').addEventListener('change', (e) => save({ replyToContacts: e.target.checked }));
+  $('replyToGroups').addEventListener('change', (e) => save({ replyToGroups: e.target.checked }));
+  $('replyToCommunities').addEventListener('change', (e) => save({ replyToCommunities: e.target.checked }));
+  $('replyToNewsletters').addEventListener('change', (e) => save({ replyToNewsletters: e.target.checked }));
+
+  $('modeSwitch').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-mode]');
+    if (!btn || btn.disabled) return;
+    save({ replyMode: btn.dataset.mode });
+  });
+
+  let textTimer = null;
+  $('replyText').addEventListener('input', (e) => {
+    clearTimeout(textTimer);
+    const value = e.target.value;
+    textTimer = setTimeout(() => save({ replyText: value }), 450);
+  });
+
+  $('provider').addEventListener('change', (e) => save({ aiProvider: e.target.value }));
+
+  $('openDashboard').addEventListener('click', () => {
+    const tab = settings.replyMode === 'bot' ? 'bot' : settings.replyMode === 'ai' ? 'ai' : 'common';
+    openDashboard(tab);
+  });
+  $('openBots').addEventListener('click', () => openDashboard('bot'));
+  $('openLogs').addEventListener('click', () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL('logs/logs.html') });
+  });
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'sync') {
+      chrome.storage.sync.get(null).then((raw) => {
+        settings = normalizeSettings(raw);
+        render();
+      });
+    }
+    if (area === 'local' && changes.queue) refreshQueue();
+    if (area === 'local' && changes.bots) refreshBots();
+  });
+
+  // ---------------------------------------------------------------- init
+  (async () => {
+    const raw = await chrome.storage.sync.get(null);
+    settings = normalizeSettings(raw);
+    render();
+    await Promise.all([refreshStatus(), refreshQueue(), refreshBots()]);
+    setInterval(() => {
+      refreshStatus();
+      refreshQueue();
+    }, 5000);
+  })();
 })();

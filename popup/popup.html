@@ -7,32 +7,66 @@
 </head>
 <body>
   <header>
-    <h1>WA Auto Reply</h1>
-    <div id="status" class="status">Checking…</div>
+    <div class="brand">
+      <span class="logo">WA</span>
+      <div>
+        <h1>WA Auto Reply</h1>
+        <div id="status" class="status">Checking…</div>
+      </div>
+    </div>
+    <label class="master" title="Master switch">
+      <input type="checkbox" id="enabled" class="switch" />
+      <span class="sr">Auto-reply</span>
+    </label>
   </header>
 
-  <label class="switch-row">
-    <span>Auto-reply</span>
-    <input type="checkbox" id="enabled" />
-  </label>
+  <main>
+    <div class="segmented" id="modeSwitch">
+      <button type="button" data-mode="fixed">Fixed</button>
+      <button type="button" data-mode="bot">Bot</button>
+      <button type="button" data-mode="ai" disabled title="AI configuration is coming soon">AI <span class="soon">Soon</span></button>
+    </div>
 
-  <label class="switch-row">
-    <span>Also reply in groups</span>
-    <input type="checkbox" id="replyToGroups" />
-  </label>
+    <label class="field" id="fixedBox">
+      <textarea id="replyText" rows="3" maxlength="900" placeholder="Your auto-reply…"></textarea>
+    </label>
 
-  <label class="field">
-    <span>Reply message</span>
-    <textarea id="replyText" rows="4" maxlength="500" placeholder="Type your auto-reply…"></textarea>
-  </label>
+    <div id="botBox" hidden>
+      <p class="hint" id="botSummary">Loading bots…</p>
+      <button id="openBots" class="ghost" type="button">Configure bots</button>
+    </div>
 
-  <button id="openLogs" class="logs-btn">📋 Open diagnostic logs</button>
+    <div id="aiBox" hidden>
+      <label class="field">
+        <span class="label">Provider</span>
+        <select id="provider"></select>
+      </label>
+      <p class="hint" id="providerHint"></p>
+      <p class="hint">AI configuration is coming soon. The engine is retained for existing setups.</p>
+    </div>
 
-  <div class="hint">
-    Uses WhatsApp's own API (wa-js) inside the WhatsApp Web tab. If anything
-    fails, the Logs page shows exactly what broke.
-  </div>
+    <div class="rows">
+      <label class="row"><span>Direct chats</span><input type="checkbox" id="replyToContacts" class="switch" /></label>
+      <label class="row"><span>Groups</span><input type="checkbox" id="replyToGroups" class="switch" /></label>
+      <label class="row"><span>Communities</span><input type="checkbox" id="replyToCommunities" class="switch" /></label>
+      <label class="row"><span>Channels</span><input type="checkbox" id="replyToNewsletters" class="switch" /></label>
+    </div>
 
+    <div class="queue-line">
+      <span id="queueLine">Queue: 0 pending</span>
+      <span id="delayLine" class="muted"></span>
+    </div>
+
+    <button id="openDashboard" class="primary" type="button">Open dashboard</button>
+    <button id="openLogs" class="ghost" type="button">Diagnostic logs</button>
+  </main>
+
+  <footer>
+    Human-paced replies · bots &amp; per-chat controls in the dashboard
+    <span id="version" class="ver"></span>
+  </footer>
+
+  <script src="../lib/defaults.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

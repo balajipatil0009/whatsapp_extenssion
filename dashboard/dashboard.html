@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WA Auto Reply — Dashboard</title>
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">WA</div>
+        <div>
+          <h1>WA Auto Reply</h1>
+          <p class="sub">Human-paced replies · <span id="version">v2.1.0</span></p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span id="connPill" class="pill">Checking…</span>
+        <label class="master" title="Master switch">
+          <span class="master-label">Auto-reply</span>
+          <input type="checkbox" id="enabled" class="switch" />
+        </label>
+        <button id="openWhatsApp" class="btn ghost" type="button">Open WhatsApp</button>
+        <button id="openLogs" class="btn ghost" type="button">Logs</button>
+      </div>
+    </header>
+
+    <nav class="top-nav" id="mainTabs" aria-label="Dashboard sections">
+      <button type="button" data-tab="conversations" class="active">
+        <span>Conversations</span>
+        <span id="convTotal" class="nav-count">0</span>
+      </button>
+      <span class="nav-sep" aria-hidden="true"></span>
+      <div class="nav-group">
+        <button type="button" data-tab="common">Common</button>
+        <button type="button" data-tab="bot">Bot</button>
+        <button type="button" data-tab="ai">AI <span class="soon-badge">Soon</span></button>
+      </div>
+    </nav>
+
+    <main class="layout">
+      <aside class="rail">
+        <!-- conversations -->
+        <section class="rail-section" data-rail="conversations">
+          <input type="search" id="search" class="side-search" placeholder="Search chats…" />
+          <select id="convFilter" class="side-filter" aria-label="Filter conversations">
+            <option value="all">All chats</option>
+            <option value="contact">Direct</option>
+            <option value="group">Groups</option>
+            <option value="community">Communities</option>
+            <option value="newsletter">Channels</option>
+            <option value="off">Replies off</option>
+          </select>
+          <div id="convList" class="rail-list conv-list"></div>
+          <div id="convEmpty" class="empty rail-empty" hidden>
+            <p>No conversations yet.</p>
+            <p class="muted">Chats appear here as messages arrive.</p>
+          </div>
+        </section>
+
+        <!-- bots -->
+        <section class="rail-section" data-rail="bot" hidden>
+          <div class="rail-head">
+            <span>Bots</span>
+            <span id="botCount" class="muted">0 bots</span>
+          </div>
+          <button id="newBot" class="btn primary tiny rail-new" type="button">+ New bot</button>
+          <div id="botList" class="rail-list"></div>
+        </section>
+
+        <!-- common sections -->
+        <section class="rail-section" data-rail="common" hidden>
+          <div class="rail-head"><span>Settings</span></div>
+          <nav class="rail-nav" id="commonSections">
+            <button type="button" data-section="engine" class="active">Reply engine</button>
+            <button type="button" data-section="recipients">Recipients</button>
+            <button type="button" data-section="pacing">Pacing &amp; limits</button>
+            <button type="button" data-section="queue">Send queue</button>
+          </nav>
+        </section>
+
+        <!-- ai -->
+        <section class="rail-section" data-rail="ai" hidden>
+          <div class="rail-head"><span>AI</span><span class="soon-badge">Soon</span></div>
+          <nav class="rail-nav">
+            <button type="button" class="active">AI settings</button>
+            <button type="button" disabled>Providers</button>
+            <button type="button" disabled>Context &amp; memory</button>
+          </nav>
+          <p class="rail-note">Configuration returns in a later release.</p>
+        </section>
+      </aside>
+
+      <section class="content">
+        <!-- ======================================================= CONVERSATIONS -->
+        <div class="pane" data-pane="conversations" hidden>
+          <div id="convDetailEmpty" class="card empty">
+            <p>Select a conversation</p>
+            <p class="muted">Pick a chat on the left to view and edit its rules. Chats appear as messages arrive.</p>
+          </div>
+          <article id="convDetail" class="card conv-detail" hidden>
+            <header class="card-head conv-detail-head">
+              <div>
+                <h2 id="sheetTitle">Conversation</h2>
+                <p class="muted" id="sheetId"></p>
+              </div>
+            </header>
+            <div id="sheetBody" class="detail-body"></div>
+          </article>
+        </div>
+
+        <!-- ============================================================ COMMON -->
+        <div class="pane" data-pane="common" hidden>
+          <article class="card common-section" data-common="engine">
+            <header class="card-head">
+              <h2>Reply engine</h2>
+              <div class="segmented" id="modeSwitch">
+                <button type="button" data-mode="fixed">Fixed</button>
+                <button type="button" data-mode="bot">Bot</button>
+                <button type="button" data-mode="ai" title="AI configuration is coming soon" disabled>AI</button>
+              </div>
+            </header>
+
+            <label class="field" id="fixedField">
+              <span class="label">Reply message</span>
+              <textarea id="replyText" rows="3" maxlength="900" placeholder="Thanks for your message! …"></textarea>
+            </label>
+
+            <div id="botHint" class="mode-note" hidden>
+              <strong>Bot replies</strong> are keyword-based. Each bot has one reply and several keywords; only one
+              bot answers a message.
+              <button type="button" class="link" data-goto-tab="bot">Configure bots →</button>
+            </div>
+            <p class="hint" id="modeHint"></p>
+          </article>
+
+          <article class="card common-section" data-common="recipients" hidden>
+            <header class="card-head"><h2>Who gets a reply</h2></header>
+            <div class="rows">
+              <label class="row"><span>Direct chats</span><input type="checkbox" id="replyToContacts" class="switch" /></label>
+              <label class="row"><span>Groups</span><input type="checkbox" id="replyToGroups" class="switch" /></label>
+              <label class="row"><span>Communities</span><input type="checkbox" id="replyToCommunities" class="switch" /></label>
+              <label class="row"><span>Channels</span><input type="checkbox" id="replyToNewsletters" class="switch" /></label>
+            </div>
+            <p class="hint">Per-chat switches in the Conversations list always win over these defaults.</p>
+          </article>
+
+          <article class="card common-section" data-common="pacing" hidden>
+            <header class="card-head"><h2>Human pacing &amp; limits</h2></header>
+            <div class="two">
+              <label class="field">
+                <span class="label">Delay min (s)</span>
+                <input type="number" id="delayMinSec" min="0" max="600" step="0.5" />
+              </label>
+              <label class="field">
+                <span class="label">Delay max (s)</span>
+                <input type="number" id="delayMaxSec" min="0" max="600" step="0.5" />
+              </label>
+            </div>
+            <label class="row small"><span>Simulate typing…</span><input type="checkbox" id="typingSimulation" class="switch" /></label>
+            <label class="row small"><span>Mark chats as read</span><input type="checkbox" id="markSeen" class="switch" /></label>
+            <div class="two">
+              <label class="field">
+                <span class="label">Max sends / hour</span>
+                <input type="number" id="maxSendsPerHour" min="1" max="500" step="1" />
+              </label>
+              <label class="field">
+                <span class="label">Gap between sends (s)</span>
+                <input type="number" id="gapSec" min="0" max="60" step="0.5" />
+              </label>
+            </div>
+            <div class="two">
+              <label class="field">
+                <span class="label">Per-chat cooldown (s)</span>
+                <input type="number" id="cooldownSec" min="0" max="3600" step="5" />
+              </label>
+              <label class="field">
+                <span class="label">Ignore messages older than (s)</span>
+                <input type="number" id="staleSec" min="0" max="3600" step="10" />
+              </label>
+            </div>
+            <button id="resetPacing" class="btn tiny" type="button">Reset to defaults</button>
+            <p class="hint" id="delayHint">Replies wait a random time in this range, then show “typing…” before sending.</p>
+          </article>
+
+          <article class="card common-section" data-common="queue" hidden>
+            <header class="card-head">
+              <h2>Send queue</h2>
+              <button id="cancelAll" class="btn tiny" type="button">Cancel all</button>
+            </header>
+            <div id="queueList" class="queue"></div>
+            <p class="hint" id="queueHint">The queue lives in the WhatsApp tab; delays pause if that tab is closed.</p>
+          </article>
+        </div>
+
+        <!-- =============================================================== BOT -->
+        <div class="pane" data-pane="bot" hidden>
+          <article class="card" id="botEditorCard">
+            <header class="card-head">
+              <div>
+                <h2 id="botEditorTitle">New bot</h2>
+                <p class="muted" id="botEditorState">Draft</p>
+              </div>
+              <div class="btnrow" id="botEditActions" hidden>
+                <button id="botMoveUp" class="btn tiny" type="button" title="Move up">↑</button>
+                <button id="botMoveDown" class="btn tiny" type="button" title="Move down">↓</button>
+                <button id="botDelete" class="btn tiny danger" type="button">Delete</button>
+              </div>
+            </header>
+            <label class="field">
+              <span class="label">Bot name</span>
+              <input type="text" id="botName" maxlength="60" placeholder="e.g. Pricing" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span class="label">Reply message</span>
+              <textarea id="botReply" rows="3" maxlength="2000" placeholder="What should this bot send?"></textarea>
+            </label>
+            <div class="field">
+              <span class="label">Keywords</span>
+              <div id="botKeywords" class="kw-list"></div>
+              <div class="kw-add">
+                <input type="text" id="botKeywordInput" maxlength="100" placeholder="keyword or phrase" autocomplete="off" />
+                <select id="botKeywordType">
+                  <option value="contains">contains</option>
+                  <option value="exact">exact</option>
+                </select>
+                <button id="botKeywordAdd" class="btn tiny" type="button">Add</button>
+              </div>
+              <p class="hint">“exact” compares the whole message; “contains” matches the phrase anywhere. Case and extra spaces are ignored.</p>
+            </div>
+            <p id="botError" class="form-error" hidden></p>
+            <div class="btnrow">
+              <button id="botSave" class="btn primary" type="button">Save bot</button>
+              <button id="botCancel" class="btn" type="button">Clear</button>
+            </div>
+          </article>
+
+          <article class="card">
+            <header class="card-head">
+              <h2>Test matching</h2>
+              <span class="muted">nothing is sent</span>
+            </header>
+            <div class="kw-add">
+              <input type="text" id="botTestInput" placeholder="Type an incoming message…" autocomplete="off" />
+              <button id="botTestBtn" class="btn tiny primary" type="button">Test</button>
+            </div>
+            <div id="botTestResult" class="test-result">Nothing tested yet.</div>
+            <p class="hint">Exact matches beat “contains”, then the order in the Bots list decides.</p>
+          </article>
+        </div>
+
+        <!-- ================================================================ AI -->
+        <div class="pane" data-pane="ai" hidden>
+          <article class="coming-soon card">
+            <div class="soon-icon">AI</div>
+            <div>
+              <h2>AI replies are coming soon</h2>
+              <p>
+                The provider engine is kept in the code, and existing AI setups keep working. Its configuration
+                screen is paused while bot replies are the focus.
+              </p>
+              <p class="muted" id="aiStatusLine">Checking providers…</p>
+            </div>
+          </article>
+
+          <details id="manualBox" class="manual card" hidden>
+            <summary>Manual prompt ready (legacy AI)</summary>
+            <pre id="manualPrompt"></pre>
+            <div class="btnrow">
+              <button id="copyManual" class="btn" type="button">Copy prompt</button>
+              <button id="captureManual" class="btn primary" type="button">Capture response</button>
+            </div>
+          </details>
+
+          <fieldset id="aiConfigFieldset" class="disabled-fieldset" disabled>
+            <article class="card">
+              <header class="card-head">
+                <h2>AI configuration</h2>
+                <span class="muted">read-only preview</span>
+              </header>
+              <div class="two">
+                <label class="field">
+                  <span class="label">Provider</span>
+                  <select id="aiProvider">
+                    <option value="auto">Auto (round-robin)</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="label">Your name (optional)</span>
+                  <input type="text" id="ownerName" maxlength="40" placeholder="e.g. Aarav" />
+                </label>
+              </div>
+              <label class="field">
+                <span class="label">Persona &amp; rules</span>
+                <textarea id="aiPersona" rows="2" maxlength="400"></textarea>
+              </label>
+              <details class="advanced">
+                <summary>Custom prompt template</summary>
+                <p class="hint">Placeholders: <code>{{message}}</code>, <code>{{summary}}</code>, <code>{{recent}}</code>, <code>{{name}}</code>, <code>{{kind}}</code>, <code>{{owner}}</code>.</p>
+                <textarea id="aiPrompt" rows="5" maxlength="3000" placeholder="Leave empty for the built-in prompt…"></textarea>
+              </details>
+              <label class="row small">
+                <span>Feed prompts manually (no auto-send)</span>
+                <input type="checkbox" id="aiManual" class="switch" />
+              </label>
+            </article>
+
+            <article class="card">
+              <header class="card-head"><h2>Context &amp; memory</h2></header>
+              <label class="field">
+                <span class="label">Context mode</span>
+                <select id="contextMode">
+                  <option value="delta">Delta — leanest, provider chat keeps history</option>
+                  <option value="hybrid">Hybrid — delta + periodic re-anchor (recommended)</option>
+                  <option value="full">Full — summary + recent turns every message</option>
+                </select>
+              </label>
+              <p class="hint" id="contextHint"></p>
+              <div class="two">
+                <label class="field">
+                  <span class="label">Recent turns (full mode)</span>
+                  <input type="number" id="recentTurns" min="0" max="20" step="1" />
+                </label>
+                <label class="field">
+                  <span class="label">Re-anchor every N turns</span>
+                  <input type="number" id="anchorEveryTurns" min="1" max="200" step="1" />
+                </label>
+              </div>
+              <div class="two">
+                <label class="field">
+                  <span class="label">Summaries</span>
+                  <select id="summaryMode">
+                    <option value="off">Off</option>
+                    <option value="extractive">Extractive (free, local)</option>
+                    <option value="ai">Extractive + AI on demand</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="label">Refresh every N turns</span>
+                  <input type="number" id="summaryEveryTurns" min="2" max="100" step="1" />
+                </label>
+              </div>
+              <div class="statline">
+                <span><b id="convCount">0</b> conversations</span>
+                <span><b id="summaryCount">0</b> summaries</span>
+              </div>
+            </article>
+
+            <article class="card">
+              <header class="card-head">
+                <h2>AI providers</h2>
+                <span class="muted">one tab each</span>
+              </header>
+              <div id="providerList" class="providers"></div>
+              <p class="hint">Kept for the returning AI configuration. Provider tabs and round-robin code remain active.</p>
+            </article>
+          </fieldset>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>WA Auto Reply <span id="footerVersion">v2.1.0</span> · wa-js v4.6.1 · no API keys</span>
+      <span class="footer-actions">
+        <button id="openDashboardHelp" class="link" type="button">How it works</button>
+        <button id="clearData" class="link danger" type="button">Clear conversation data</button>
+      </span>
+    </footer>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="../lib/defaults.js"></script>
+  <script src="../lib/bots.js"></script>
+  <script src="../lib/context.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>
