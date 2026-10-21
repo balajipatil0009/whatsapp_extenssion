@@ -15,6 +15,8 @@ const store = { sync: {}, local: {} };
 const changeListeners = [];
 const sent = [];
 const tabs = [{ id: 1, url: 'https://web.whatsapp.com/' }];
+const badge = { text: '', color: '', title: '' };
+let failPings = false;
 
 function fire(area, obj) {
   const changes = {};
@@ -85,6 +87,10 @@ global.chrome = {
     query: async ({ url } = {}) => tabs.filter((t) => urlMatches(url, t.url)),
     sendMessage: async (tabId, message) => {
       sent.push({ tabId, message });
+      if (message?.type === 'wa2:ping') {
+        if (failPings) throw new Error('Could not establish connection. Receiving end does not exist.');
+        return { ok: true, mainReady: true };
+      }
       return { ok: true };
     },
     onUpdated: { addListener() {} },
@@ -93,8 +99,15 @@ global.chrome = {
     create: async () => ({}),
   },
   action: {
-    setBadgeText: async () => {},
-    setBadgeBackgroundColor: async () => {},
+    setBadgeText: async ({ text }) => {
+      badge.text = text;
+    },
+    setBadgeBackgroundColor: async ({ color }) => {
+      badge.color = color;
+    },
+    setTitle: async ({ title }) => {
+      badge.title = title;
+    },
   },
   alarms: { create() {}, onAlarm: { addListener() {} } },
   scripting: { executeScript: async () => [] },
@@ -259,6 +272,28 @@ test('bot mode replies with the single matching bot', async () => {
   assert.equal(replies[0].message.via, 'bot:Greeting');
 });
 
+test('bot exact match tolerates surrounding punctuation', async () => {
+  await reset({ replyMode: 'bot' });
+  store.local.bots = [
+    { id: 'b1', name: 'Greeting', enabled: true, reply: 'Exact hello', keywords: [{ text: 'hello', type: 'exact' }] },
+  ];
+  await ask(incoming('fff@c.us', 'bot5', { body: 'Hello!' }));
+  await tick(60);
+  const replies = repliesFor('fff@c.us');
+  assert.equal(replies.length, 1);
+  assert.equal(replies[0].message.text, 'Exact hello');
+});
+
+test('bot exact match does not fire on extra words', async () => {
+  await reset({ replyMode: 'bot' });
+  store.local.bots = [
+    { id: 'b1', name: 'Greeting', enabled: true, reply: 'Exact hello', keywords: [{ text: 'hello', type: 'exact' }] },
+  ];
+  await ask(incoming('ggg@c.us', 'bot6', { body: 'hello there' }));
+  await tick(60);
+  assert.equal(repliesFor('ggg@c.us').length, 0);
+});
+
 test('bot mode stays silent when nothing matches', async () => {
   await reset({ replyMode: 'bot' });
   store.local.bots = [
@@ -299,4 +334,18 @@ test('dashboard state reports providers and queue length', async () => {
   assert.equal(state.providers.length, 4);
   assert.ok(state.providers.some((p) => p.id === 'gemini'));
   assert.ok(Number.isFinite(state.aiQueue));
+});
+
+test('toolbar badge follows a live bridge probe', async () => {
+  failPings = false;
+  await chrome.storage.sync.set({ enabled: true });
+  await tick(120);
+  assert.equal(badge.text, 'ON');
+
+  failPings = true;
+  await chrome.storage.sync.set({ enabled: true });
+  await tick(120);
+  assert.equal(badge.text, '!');
+  assert.match(badge.title, /reload/i);
+  failPings = false;
 });

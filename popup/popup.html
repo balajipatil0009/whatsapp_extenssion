@@ -24,7 +24,6 @@
     <div class="segmented" id="modeSwitch">
       <button type="button" data-mode="fixed">Fixed</button>
       <button type="button" data-mode="bot">Bot</button>
-      <button type="button" data-mode="ai" disabled title="AI configuration is coming soon">AI <span class="soon">Soon</span></button>
     </div>
 
     <label class="field" id="fixedBox">
@@ -36,13 +35,9 @@
       <button id="openBots" class="ghost" type="button">Configure bots</button>
     </div>
 
-    <div id="aiBox" hidden>
-      <label class="field">
-        <span class="label">Provider</span>
-        <select id="provider"></select>
-      </label>
-      <p class="hint" id="providerHint"></p>
-      <p class="hint">AI configuration is coming soon. The engine is retained for existing setups.</p>
+    <div id="aiBox" class="soon-note" hidden>
+      <strong>AI replies are coming soon</strong>
+      <p class="hint">This setup still uses AI from an earlier version. Configuration is on its way — switch to Fixed or Bot to change engines.</p>
     </div>
 
     <div class="rows">

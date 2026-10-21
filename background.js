@@ -24,7 +24,7 @@ const {
 } = self.WA2;
 const { buildPrompt, sanitizeReply, makeExtractiveSummary } = self.WA2;
 const { evaluateIncoming, delayRangeFor } = self.WA2;
-const { findMatchingBot } = self.WA2Bots;
+const { findMatchingBot, normalizeText } = self.WA2Bots;
 
 const VERSION = '2.1.0';
 const MAX_LOGS = 1500;
@@ -110,26 +110,59 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 // ==================================================================== badge
-async function refreshBadge() {
+let badgeInFlight = null;
+
+function refreshBadge() {
+  if (badgeInFlight) return badgeInFlight;
+  badgeInFlight = doRefreshBadge().finally(() => {
+    badgeInFlight = null;
+  });
+  return badgeInFlight;
+}
+
+async function doRefreshBadge() {
   try {
     const settings = await getSettings();
-    const { status = {} } = await chrome.storage.local.get({ status: {} });
     const tabs = await chrome.tabs.query({ url: WA_MATCH });
+    const tab = tabs.find((t) => t.active) || tabs[0];
     let text = '';
     let color = '#777';
+    let title = 'WA Auto Reply — auto-reply is off';
+
     if (settings.enabled) {
-      if (tabs.length && status.mainReady) {
-        text = 'ON';
-        color = '#25D366';
-      } else if (tabs.length) {
-        text = 'WAIT';
-        color = '#f5a623';
-      } else {
+      if (!tab) {
         text = 'IDLE';
+        title = 'WhatsApp Web is not open';
+      } else {
+        let live = null;
+        try {
+          live = await chrome.tabs.sendMessage(tab.id, { type: 'wa2:ping' });
+        } catch {
+          live = null;
+        }
+
+        if (live && live.mainReady) {
+          text = 'ON';
+          color = '#25D366';
+          title = 'WA Auto Reply — listening for messages';
+        } else if (!live || live.reason === 'main-world-not-responding') {
+          // The bridge/page connection is gone (usually after reloading the
+          // extension while WhatsApp stayed open). The popup says "reload";
+          // the badge must not keep saying ON.
+          text = '!';
+          color = '#d92d20';
+          title = 'WA Auto Reply — reload the WhatsApp Web tab to reconnect';
+        } else {
+          text = 'WAIT';
+          color = '#f5a623';
+          title = 'WA Auto Reply — WhatsApp is still connecting';
+        }
       }
     }
+
     await chrome.action.setBadgeText({ text });
     await chrome.action.setBadgeBackgroundColor({ color });
+    await chrome.action.setTitle({ title });
   } catch (e) {
     console.warn('[WA2][bg] badge', e);
   }
@@ -761,7 +794,8 @@ async function handleIncoming(payload, sender) {
   // message that no bot matches does not burn the cooldown.
   let botMatch = null;
   if (settings.replyMode === 'bot') {
-    botMatch = findMatchingBot(await getBots(), ev.body);
+    const bots = await getBots();
+    botMatch = findMatchingBot(bots, ev.body);
     if (botMatch) {
       log(
         'info',
@@ -769,7 +803,21 @@ async function handleIncoming(payload, sender) {
         `"${truncate(botMatch.keyword.text, 40)}" (${botMatch.matchType}) → bot "${botMatch.bot.name}" for ${ev.chatId}`
       );
     } else {
-      log('info', 'bot', `No bot matched "${truncate(ev.body, 60)}" for ${ev.chatId} — no reply`);
+      const enabled = bots.filter((b) => b && b.enabled !== false);
+      const detail = enabled
+        .map(
+          (b) =>
+            `${b.name || '?'}[${(b.keywords || [])
+              .map((k) => `${k.text}:${k.type || 'contains'}`)
+              .join(', ')}]`
+        )
+        .join(' | ');
+      log(
+        'info',
+        'bot',
+        `No bot matched "${truncate(ev.body, 60)}" (normalized "${truncate(normalizeText(ev.body), 60)}") ` +
+          `for ${ev.chatId} — ${enabled.length ? detail : 'no enabled bots'}`
+      );
       return;
     }
   }

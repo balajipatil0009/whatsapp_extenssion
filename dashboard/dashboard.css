@@ -744,7 +744,7 @@ input:focus, select:focus, textarea:focus {
   padding: 3px 4px 3px 9px;
   font-size: 11.5px;
 }
-.kw-edit button {
+.kw-edit .kw-remove {
   border: 0;
   background: var(--danger-soft);
   color: var(--danger);
@@ -756,7 +756,20 @@ input:focus, select:focus, textarea:focus {
   font-size: 11px;
   padding: 0;
 }
-.kw-edit i { font-style: normal; font-size: 9px; text-transform: uppercase; color: var(--muted); }
+.kw-edit .kw-type {
+  border: 1px solid var(--line);
+  background: var(--card2);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  padding: 1px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.kw-edit .kw-type:hover { background: var(--card); color: var(--text); }
+.kw-edit.exact .kw-type { border-color: var(--accent); color: var(--accent-ink); }
 .kw-add { display: grid; grid-template-columns: minmax(0, 1fr) 92px auto; gap: 6px; margin-top: 6px; }
 .kw-add input, .kw-add select { padding: 6px 8px; font-size: 12px; }
 .kw-add .btn { padding: 6px 10px; }
@@ -782,7 +795,60 @@ input:focus, select:focus, textarea:focus {
 .test-result.ok { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
 .test-result.bad { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
 
-/* ================================================================ AI coming soon */
+/* ==================================================== AI — coming soon (SVG) */
+.pane.ai-soon-pane { max-width: none; min-height: 70vh; justify-content: center; }
+.ai-soon {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 12px;
+  padding: 40px 24px 48px;
+  min-height: 440px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(120% 90% at 50% 0%, var(--blue-soft), transparent 70%),
+    var(--card);
+  box-shadow: var(--shadow);
+}
+.ai-soon-art { line-height: 0; animation: ai-float 6s ease-in-out infinite; }
+.ai-soon-art svg { width: 260px; height: auto; max-width: 78vw; }
+.ai-soon h2 { margin: 2px 0 0; font-size: 20px; letter-spacing: -0.01em; }
+.ai-soon-sub { margin: 0; max-width: 46ch; color: var(--muted); font-size: 13.5px; line-height: 1.6; }
+.ai-soon .soon-badge { font-size: 9.5px; padding: 3px 8px; }
+
+.ai-ring { transform-origin: 130px 110px; animation: ai-spin 46s linear infinite; }
+.ai-dot { animation: ai-pulse 1.6s ease-in-out infinite; }
+.ai-dot-2 { animation-delay: 0.22s; }
+.ai-dot-3 { animation-delay: 0.44s; }
+.ai-spark { animation: ai-twinkle 3.4s ease-in-out infinite; }
+.ai-spark-2 { animation-delay: 0.9s; }
+.ai-spark-3 { animation-delay: 1.7s; }
+
+@keyframes ai-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+@keyframes ai-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes ai-pulse {
+  0%, 100% { opacity: 0.5; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-4px); }
+}
+@keyframes ai-twinkle {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-soon-art, .ai-ring, .ai-dot, .ai-spark { animation: none; }
+}
+
+/* Retained for the legacy AI page kept in dashboard/ai-legacy.html. */
 .coming-soon {
   display: flex;
   gap: 14px;

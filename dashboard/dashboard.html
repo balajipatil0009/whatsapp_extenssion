@@ -84,12 +84,7 @@
         <!-- ai -->
         <section class="rail-section" data-rail="ai" hidden>
           <div class="rail-head"><span>AI</span><span class="soon-badge">Soon</span></div>
-          <nav class="rail-nav">
-            <button type="button" class="active">AI settings</button>
-            <button type="button" disabled>Providers</button>
-            <button type="button" disabled>Context &amp; memory</button>
-          </nav>
-          <p class="rail-note">Configuration returns in a later release.</p>
+          <p class="rail-note">In development — nothing to configure yet.</p>
         </section>
       </aside>
 
@@ -119,7 +114,6 @@
               <div class="segmented" id="modeSwitch">
                 <button type="button" data-mode="fixed">Fixed</button>
                 <button type="button" data-mode="bot">Bot</button>
-                <button type="button" data-mode="ai" title="AI configuration is coming soon" disabled>AI</button>
               </div>
             </header>
 
@@ -228,7 +222,7 @@
                 </select>
                 <button id="botKeywordAdd" class="btn tiny" type="button">Add</button>
               </div>
-              <p class="hint">“exact” compares the whole message; “contains” matches the phrase anywhere. Case and extra spaces are ignored.</p>
+              <p class="hint">“exact” compares the whole message (surrounding punctuation is ignored); “contains” matches the phrase anywhere. Click a keyword's type to switch it. Case and extra spaces are ignored.</p>
             </div>
             <p id="botError" class="form-error" hidden></p>
             <div class="btnrow">
@@ -252,111 +246,53 @@
         </div>
 
         <!-- ================================================================ AI -->
-        <div class="pane" data-pane="ai" hidden>
-          <article class="coming-soon card">
-            <div class="soon-icon">AI</div>
-            <div>
-              <h2>AI replies are coming soon</h2>
-              <p>
-                The provider engine is kept in the code, and existing AI setups keep working. Its configuration
-                screen is paused while bot replies are the focus.
-              </p>
-              <p class="muted" id="aiStatusLine">Checking providers…</p>
+        <div class="pane ai-soon-pane" data-pane="ai" hidden>
+          <section class="ai-soon">
+            <div class="ai-soon-art" aria-hidden="true">
+              <svg viewBox="0 0 260 210" width="260" height="210" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <linearGradient id="aiGrad" x1="30" y1="40" x2="230" y2="190" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" style="stop-color: var(--blue)" />
+                    <stop offset="1" style="stop-color: var(--accent)" />
+                  </linearGradient>
+                  <linearGradient id="aiGlow" x1="40" y1="30" x2="220" y2="190" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" style="stop-color: var(--blue)" stop-opacity="0.28" />
+                    <stop offset="1" style="stop-color: var(--accent)" stop-opacity="0.04" />
+                  </linearGradient>
+                </defs>
+
+                <ellipse cx="130" cy="112" rx="98" ry="74" fill="url(#aiGlow)" />
+
+                <circle class="ai-ring" cx="130" cy="110" r="82" style="stroke: var(--blue)"
+                  stroke-opacity="0.4" stroke-width="1.5" stroke-dasharray="5 9" />
+
+                <path class="ai-bubble"
+                  d="M52 58 H208 A26 26 0 0 1 234 84 V136 A26 26 0 0 1 208 162 H108 L80 190 V162 H52 A26 26 0 0 1 26 136 V84 A26 26 0 0 1 52 58 Z"
+                  style="fill: var(--card)" stroke="url(#aiGrad)" stroke-width="3" stroke-linejoin="round" />
+
+                <circle class="ai-dot" cx="104" cy="110" r="9" fill="url(#aiGrad)" />
+                <circle class="ai-dot ai-dot-2" cx="130" cy="110" r="9" fill="url(#aiGrad)" />
+                <circle class="ai-dot ai-dot-3" cx="156" cy="110" r="9" fill="url(#aiGrad)" />
+
+                <path class="ai-spark ai-spark-1" transform="translate(213 46)"
+                  d="M0 -20 C2 -7 7 -2 20 0 C7 2 2 7 0 20 C-2 7 -7 2 -20 0 C-7 -2 -2 -7 0 -20 Z" fill="url(#aiGrad)" />
+                <path class="ai-spark ai-spark-2" transform="translate(40 38) scale(0.55)"
+                  d="M0 -20 C2 -7 7 -2 20 0 C7 2 2 7 0 20 C-2 7 -7 2 -20 0 C-7 -2 -2 -7 0 -20 Z" fill="url(#aiGrad)" />
+                <path class="ai-spark ai-spark-3" transform="translate(236 146) scale(0.42)"
+                  d="M0 -20 C2 -7 7 -2 20 0 C7 2 2 7 0 20 C-2 7 -7 2 -20 0 C-7 -2 -2 -7 0 -20 Z" fill="url(#aiGrad)" />
+
+                <circle cx="130" cy="28" r="5" style="fill: var(--accent)" />
+                <circle cx="210" cy="110" r="4" style="fill: var(--blue)" />
+                <circle cx="50" cy="110" r="4" style="fill: var(--blue)" fill-opacity="0.55" />
+              </svg>
             </div>
-          </article>
-
-          <details id="manualBox" class="manual card" hidden>
-            <summary>Manual prompt ready (legacy AI)</summary>
-            <pre id="manualPrompt"></pre>
-            <div class="btnrow">
-              <button id="copyManual" class="btn" type="button">Copy prompt</button>
-              <button id="captureManual" class="btn primary" type="button">Capture response</button>
-            </div>
-          </details>
-
-          <fieldset id="aiConfigFieldset" class="disabled-fieldset" disabled>
-            <article class="card">
-              <header class="card-head">
-                <h2>AI configuration</h2>
-                <span class="muted">read-only preview</span>
-              </header>
-              <div class="two">
-                <label class="field">
-                  <span class="label">Provider</span>
-                  <select id="aiProvider">
-                    <option value="auto">Auto (round-robin)</option>
-                  </select>
-                </label>
-                <label class="field">
-                  <span class="label">Your name (optional)</span>
-                  <input type="text" id="ownerName" maxlength="40" placeholder="e.g. Aarav" />
-                </label>
-              </div>
-              <label class="field">
-                <span class="label">Persona &amp; rules</span>
-                <textarea id="aiPersona" rows="2" maxlength="400"></textarea>
-              </label>
-              <details class="advanced">
-                <summary>Custom prompt template</summary>
-                <p class="hint">Placeholders: <code>{{message}}</code>, <code>{{summary}}</code>, <code>{{recent}}</code>, <code>{{name}}</code>, <code>{{kind}}</code>, <code>{{owner}}</code>.</p>
-                <textarea id="aiPrompt" rows="5" maxlength="3000" placeholder="Leave empty for the built-in prompt…"></textarea>
-              </details>
-              <label class="row small">
-                <span>Feed prompts manually (no auto-send)</span>
-                <input type="checkbox" id="aiManual" class="switch" />
-              </label>
-            </article>
-
-            <article class="card">
-              <header class="card-head"><h2>Context &amp; memory</h2></header>
-              <label class="field">
-                <span class="label">Context mode</span>
-                <select id="contextMode">
-                  <option value="delta">Delta — leanest, provider chat keeps history</option>
-                  <option value="hybrid">Hybrid — delta + periodic re-anchor (recommended)</option>
-                  <option value="full">Full — summary + recent turns every message</option>
-                </select>
-              </label>
-              <p class="hint" id="contextHint"></p>
-              <div class="two">
-                <label class="field">
-                  <span class="label">Recent turns (full mode)</span>
-                  <input type="number" id="recentTurns" min="0" max="20" step="1" />
-                </label>
-                <label class="field">
-                  <span class="label">Re-anchor every N turns</span>
-                  <input type="number" id="anchorEveryTurns" min="1" max="200" step="1" />
-                </label>
-              </div>
-              <div class="two">
-                <label class="field">
-                  <span class="label">Summaries</span>
-                  <select id="summaryMode">
-                    <option value="off">Off</option>
-                    <option value="extractive">Extractive (free, local)</option>
-                    <option value="ai">Extractive + AI on demand</option>
-                  </select>
-                </label>
-                <label class="field">
-                  <span class="label">Refresh every N turns</span>
-                  <input type="number" id="summaryEveryTurns" min="2" max="100" step="1" />
-                </label>
-              </div>
-              <div class="statline">
-                <span><b id="convCount">0</b> conversations</span>
-                <span><b id="summaryCount">0</b> summaries</span>
-              </div>
-            </article>
-
-            <article class="card">
-              <header class="card-head">
-                <h2>AI providers</h2>
-                <span class="muted">one tab each</span>
-              </header>
-              <div id="providerList" class="providers"></div>
-              <p class="hint">Kept for the returning AI configuration. Provider tabs and round-robin code remain active.</p>
-            </article>
-          </fieldset>
+            <span class="soon-badge">In development</span>
+            <h2>AI replies are coming soon</h2>
+            <p class="ai-soon-sub">
+              A rebuilt AI engine is on the way — context-aware replies with your choice of provider, still
+              running inside a normal WhatsApp Web tab.
+            </p>
+          </section>
         </div>
       </section>
     </main>

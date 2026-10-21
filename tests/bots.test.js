@@ -26,6 +26,22 @@ test('exact keywords match the whole message only', () => {
   assert.equal(findMatchingBot(bots, 'hi there'), null);
 });
 
+test('exact matching tolerates surrounding punctuation and invisible characters', () => {
+  const bots = [bot('b1', 'Hi', [{ text: 'hi', type: 'exact' }])];
+  for (const message of ['Hi!', '"Hi"', 'hi…', 'Hi. ', 'H\u200Bi']) {
+    const match = findMatchingBot(bots, message);
+    assert.ok(match, `expected a match for ${JSON.stringify(message)}`);
+    assert.equal(match.matchType, 'exact');
+  }
+  assert.equal(findMatchingBot(bots, 'hi there'), null);
+});
+
+test('exact matching normalises Unicode composition', () => {
+  const bots = [bot('b1', 'Cafe', [{ text: 'café', type: 'exact' }])];
+  assert.ok(findMatchingBot(bots, 'cafe\u0301'), 'decomposed form should match precomposed keyword');
+  assert.ok(findMatchingBot(bots, 'CAFÉ'));
+});
+
 test('contains keywords match anywhere in the message', () => {
   const bots = [bot('b1', 'Pricing', [{ text: 'price', type: 'contains' }])];
   const match = findMatchingBot(bots, 'Can you share the price list?');
@@ -141,4 +157,14 @@ test('validation cleans keywords and grants a default type', () => {
   );
   assert.equal(result.ok, true);
   assert.deepEqual(result.bot.keywords[0], { text: 'hello world', type: 'contains' });
+});
+
+test('validation preserves an explicit exact keyword type', () => {
+  const result = validateBot(
+    { name: 'Exact', reply: 'ok', keywords: [{ text: 'hello', type: 'exact' }] },
+    [],
+    null
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.bot.keywords[0].type, 'exact');
 });

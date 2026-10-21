@@ -5,13 +5,10 @@
 
   const WA2 = window.WA2;
   const {
-    PROVIDERS,
     PROVIDER_IDS,
     DEFAULT_SETTINGS,
     normalizeSettings,
-    providerById,
   } = WA2;
-  const { buildPrompt } = WA2;
   const { findMatchingBot, findKeywordOwner, validateBot, normalizeText } = window.WA2Bots;
 
   const $ = (id) => document.getElementById(id);
@@ -105,8 +102,6 @@
     } catch {
       /* service worker asleep or reloading */
     }
-    renderProviders();
-    if (state.activeTab === 'ai') renderAiPanel();
   }
 
   // ------------------------------------------------------------------ settings
@@ -117,7 +112,6 @@
     applySettingsToInputs();
     renderMode();
     renderHints();
-    renderProviders();
     renderConvs();
     if (state.activeChat && !isEditingSheet()) renderSheet(state.activeChat);
   }
@@ -136,10 +130,6 @@
     set('replyToGroups', s.replyToGroups, 'checked');
     set('replyToCommunities', s.replyToCommunities, 'checked');
     set('replyToNewsletters', s.replyToNewsletters, 'checked');
-    set('ownerName', s.ownerName);
-    set('aiPersona', s.aiPersona);
-    set('aiPrompt', s.aiPrompt);
-    set('aiManual', s.aiManual, 'checked');
     set('typingSimulation', s.typingSimulation, 'checked');
     set('markSeen', s.markSeen, 'checked');
     set('delayMinSec', (s.replyDelayMinMs / 1000).toString());
@@ -148,21 +138,6 @@
     set('cooldownSec', (s.minRetryMs / 1000).toString());
     set('staleSec', (s.maxMessageAgeMs / 1000).toString());
     set('maxSendsPerHour', String(s.maxSendsPerHour));
-    set('recentTurns', String(s.recentTurns));
-    set('anchorEveryTurns', String(s.anchorEveryTurns));
-    set('summaryEveryTurns', String(s.summaryEveryTurns));
-    set('contextMode', s.contextMode);
-    set('summaryMode', s.summaryMode);
-    set('aiProvider', s.aiProvider);
-
-    const providerSelect = $('aiProvider');
-    const enabledIds = PROVIDER_IDS.filter((id) => s.enabledProviders[id]);
-    providerSelect.innerHTML =
-      '<option value="auto">Auto (round-robin)</option>' +
-      PROVIDERS.filter((p) => enabledIds.includes(p.id) || p.id === s.aiProvider)
-        .map((p) => `<option value="${p.id}">${esc(p.label)}</option>`)
-        .join('');
-    providerSelect.value = s.aiProvider;
   }
 
   function bindSettings() {
@@ -173,17 +148,9 @@
     $('replyToNewsletters').addEventListener('change', (e) => saveSettings({ replyToNewsletters: e.target.checked }));
     $('typingSimulation').addEventListener('change', (e) => saveSettings({ typingSimulation: e.target.checked }));
     $('markSeen').addEventListener('change', (e) => saveSettings({ markSeen: e.target.checked }));
-    $('aiManual').addEventListener('change', (e) => saveSettings({ aiManual: e.target.checked }));
 
     const textSave = debounce((key, value) => saveSettings({ [key]: value }), 500);
     $('replyText').addEventListener('input', (e) => textSave('replyText', e.target.value));
-    $('ownerName').addEventListener('input', (e) => textSave('ownerName', e.target.value));
-    $('aiPersona').addEventListener('input', (e) => textSave('aiPersona', e.target.value));
-    $('aiPrompt').addEventListener('input', (e) => textSave('aiPrompt', e.target.value));
-
-    $('aiProvider').addEventListener('change', (e) => saveSettings({ aiProvider: e.target.value }));
-    $('contextMode').addEventListener('change', (e) => saveSettings({ contextMode: e.target.value }));
-    $('summaryMode').addEventListener('change', (e) => saveSettings({ summaryMode: e.target.value }));
 
     const bindSeconds = (id, key, min) =>
       $(id).addEventListener('change', (e) => {
@@ -204,9 +171,6 @@
         saveSettings({ [key]: Math.min(max, Math.max(min, Math.round(n))) });
       });
     bindInt('maxSendsPerHour', 'maxSendsPerHour', 1, 500);
-    bindInt('recentTurns', 'recentTurns', 0, 20);
-    bindInt('anchorEveryTurns', 'anchorEveryTurns', 1, 200);
-    bindInt('summaryEveryTurns', 'summaryEveryTurns', 2, 100);
 
     $('resetPacing').addEventListener('click', () => {
       saveSettings({
@@ -234,7 +198,6 @@
     const mode = state.settings.replyMode;
     document.querySelectorAll('#modeSwitch button').forEach((b) => {
       b.classList.toggle('active', b.dataset.mode === mode);
-      if (b.dataset.mode === 'ai') b.disabled = true; // configuration is coming soon
     });
     $('fixedField').hidden = mode !== 'fixed';
     $('botHint').hidden = mode !== 'bot';
@@ -247,19 +210,10 @@
   }
 
   function renderHints() {
-    const hints = {
-      delta: 'Delta sends only the new message (plus a one-line instruction). The provider tab’s own chat history supplies the context — cheapest by far.',
-      hybrid: `Hybrid sends lean turns, then a full packet every ${state.settings.anchorEveryTurns} turns or when a provider tab switches conversation. Good accuracy at a fraction of the tokens.`,
-      full: 'Full sends the summary plus the last turns on every message. Most consistent across providers, but the largest prompt per reply.',
-    };
-    $('contextHint').textContent = hints[state.settings.contextMode] || '';
     $('delayHint').textContent =
-      `Each reply waits ${(state.settings.replyDelayMinMs / 1000).toFixed(1)}–${(state.settings.replyDelayMaxMs / 1000).toFixed(1)}s, ` +
-      `then shows “typing…” for about ${state.settings.typingCps} characters/second before sending.`;
-    $('manualBox').hidden = !state.manualPrompt;
-    if (state.manualPrompt) $('manualPrompt').textContent = state.manualPrompt.prompt || '';
-    $('convCount').textContent = String(Object.keys(state.convs).length);
-    $('summaryCount').textContent = String(Object.values(state.convs).filter((c) => c.summary).length);
+      `Order: wait ${(state.settings.replyDelayMinMs / 1000).toFixed(1)}–${(state.settings.replyDelayMaxMs / 1000).toFixed(1)}s ` +
+      `→ mark read → show “typing…” for reply length ÷ ${state.settings.typingCps} cps (1.2–12s) → send. ` +
+      `Total = wait + typing + a 0.25–0.9s hesitation.`;
     const enabledBots = state.bots.filter((b) => b.enabled !== false).length;
     $('botCount').textContent = state.bots.length ? `${enabledBots}/${state.bots.length} on` : 'none';
   }
@@ -281,7 +235,6 @@
     if (tab === 'conversations') ensureConversationSelection();
     else if (tab === 'bot') ensureBotSelection();
     else if (tab === 'common') setCommonSection(state.commonSection);
-    else if (tab === 'ai') renderAiPanel();
 
     try {
       history.replaceState(null, '', `#${tab}`);
@@ -345,18 +298,6 @@
     });
   }
 
-  function renderAiPanel() {
-    const line = $('aiStatusLine');
-    if (!line) return;
-    const open = PROVIDER_IDS.filter((id) => state.runtime[id] && state.runtime[id].tabId != null);
-    const busy = PROVIDER_IDS.filter((id) => state.runtime[id] && state.runtime[id].busy);
-    const mode = state.settings.replyMode === 'ai' ? 'AI is the current reply engine.' : 'AI is not the current reply engine.';
-    line.textContent =
-      `${mode} ${open.length ? `${open.length} provider tab${open.length === 1 ? '' : 's'} open` : 'No provider tabs open'}` +
-      (busy.length ? ` · ${busy.length} busy` : '') +
-      '.';
-  }
-
   // ------------------------------------------------------------------ bots
   function botById(id) {
     return state.bots.find((b) => b.id === id) || null;
@@ -381,8 +322,10 @@
     list.innerHTML = state.draftKeywords
       .map(
         (k, i) =>
-          `<span class="kw-edit ${k.type === 'exact' ? 'exact' : ''}">${esc(k.text)}<i>${esc(k.type)}</i>` +
-          `<button type="button" data-action="remove-keyword" data-index="${i}" aria-label="Remove keyword">✕</button></span>`
+          `<span class="kw-edit ${k.type === 'exact' ? 'exact' : ''}">${esc(k.text)}` +
+          `<button type="button" class="kw-type" data-action="toggle-keyword-type" data-index="${i}" ` +
+          `title="Switch to ${k.type === 'exact' ? 'contains' : 'exact'}">${esc(k.type)}</button>` +
+          `<button type="button" class="kw-remove" data-action="remove-keyword" data-index="${i}" aria-label="Remove keyword">✕</button></span>`
       )
       .join('');
   }
@@ -470,6 +413,7 @@
     list.innerHTML = state.bots
       .map((b, index) => {
         const keywords = b.keywords || [];
+        const exactCount = keywords.filter((k) => k.type === 'exact').length;
         return `<div class="rail-item bot-item ${b.id === state.editingBotId ? 'active' : ''} ${
           b.enabled === false ? 'off' : ''
         }" data-id="${esc(b.id)}">
@@ -478,7 +422,7 @@
           } />
           <button type="button" class="rail-item-main" data-action="edit-bot">
             <span class="rail-item-name">${esc(b.name || b.id)}</span>
-            <span class="rail-item-sub">${keywords.length} keyword${keywords.length === 1 ? '' : 's'} · #${index + 1}</span>
+            <span class="rail-item-sub">${keywords.length} kw · ${exactCount} exact · #${index + 1}</span>
           </button>
         </div>`;
       })
@@ -554,6 +498,24 @@
     startEditBot(id, false);
   }
 
+  function testerBots() {
+    const name = $('botName').value.trim();
+    const reply = $('botReply').value.trim();
+    const hasDraft = state.draftKeywords.length > 0 || name || reply;
+    if (!hasDraft) return state.bots;
+    const draft = {
+      id: state.editingBotId || '__draft__',
+      name: name || 'Draft bot',
+      enabled: true,
+      reply: reply || '(no reply set)',
+      keywords: state.draftKeywords,
+    };
+    if (state.editingBotId) {
+      return state.bots.map((b) => (b.id === state.editingBotId ? { ...b, ...draft } : b));
+    }
+    return [...state.bots, draft];
+  }
+
   function testBot() {
     const text = $('botTestInput').value;
     const result = $('botTestResult');
@@ -562,15 +524,30 @@
       result.textContent = 'Type a message to test.';
       return;
     }
-    const match = findMatchingBot(state.bots, text);
+    const bots = testerBots();
+    const match = findMatchingBot(bots, text);
     if (!match) {
+      const normalized = normalizeText(text);
+      const partialExact = new Set();
+      for (const bot of bots) {
+        for (const keyword of bot.keywords || []) {
+          const key = normalizeText(keyword.text);
+          if (keyword.type === 'exact' && key && key !== normalized && normalized.includes(key)) {
+            partialExact.add(keyword.text);
+          }
+        }
+      }
       result.className = 'test-result bad';
-      result.textContent = 'No bot matches — no reply would be sent.';
+      result.textContent = partialExact.size
+        ? `No exact match. ${[...partialExact].map((k) => `"${k}"`).join(', ')} appear in this message, but exact means the whole message must equal the keyword. Click the keyword's type in the editor to switch it to contains.`
+        : 'No bot matches — no reply would be sent.';
       return;
     }
+    const draftNote =
+      match.bot.id === '__draft__' || match.bot.id === state.editingBotId ? ' (current editor)' : '';
     result.className = 'test-result ok';
     result.textContent =
-      `Bot "${match.bot.name}" matches the ${match.matchType} keyword "${match.keyword.text}" ` +
+      `Bot "${match.bot.name}"${draftNote} matches the ${match.matchType} keyword "${match.keyword.text}" ` +
       `→ "${match.bot.reply}"`;
   }
 
@@ -608,13 +585,24 @@
       testBot();
     });
     $('botKeywords').addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-action="remove-keyword"]');
-      if (!btn) return;
-      const index = Number(btn.dataset.index);
+      const action = e.target.closest('[data-action]');
+      if (!action) return;
+      const index = Number(action.dataset.index);
       if (!Number.isInteger(index)) return;
-      state.draftKeywords.splice(index, 1);
-      hideBotError();
-      renderKeywordDraft();
+      if (action.dataset.action === 'remove-keyword') {
+        state.draftKeywords.splice(index, 1);
+        hideBotError();
+        renderKeywordDraft();
+        return;
+      }
+      if (action.dataset.action === 'toggle-keyword-type') {
+        const keyword = state.draftKeywords[index];
+        if (!keyword) return;
+        keyword.type = keyword.type === 'exact' ? 'contains' : 'exact';
+        hideBotError();
+        renderKeywordDraft();
+        toast(`"${keyword.text}" now uses ${keyword.type} — press Save bot`);
+      }
     });
     $('botList').addEventListener('click', (e) => {
       const actionEl = e.target.closest('[data-action="edit-bot"]');
@@ -635,41 +623,7 @@
     renderBotEditorActions();
   }
 
-  // ------------------------------------------------------------------ providers
-  function renderProviders() {
-    const list = $('providerList');
-    const s = state.settings;
-    list.innerHTML = PROVIDERS.map((p) => {
-      const rt = state.runtime[p.id] || {};
-      const enabled = !!s.enabledProviders[p.id];
-      const tab = rt.tabId != null;
-      const busy = !!rt.busy;
-      const dot = !enabled ? '' : busy ? 'busy' : tab ? 'ok' : 'err';
-      const status = !enabled
-        ? 'Disabled'
-        : busy
-          ? `Busy · ${chatName(rt.activeChat) || 'working'}`
-          : tab
-            ? 'Ready · tab open'
-            : 'No tab open';
-      const err = rt.stats && rt.stats.lastError ? ` · last error: ${rt.stats.lastError}` : '';
-      return `
-        <div class="provider ${enabled ? '' : 'off'}" data-pid="${p.id}">
-          <span class="provider-dot ${dot}"></span>
-          <div>
-            <div class="provider-name">${esc(p.label)}</div>
-            <div class="provider-sub">${esc(status)}${esc(err)}</div>
-          </div>
-          <div class="provider-actions">
-            <button class="btn tiny" type="button" data-action="test-provider" data-pid="${p.id}">Test</button>
-            <button class="btn tiny" type="button" data-action="new-chat" data-pid="${p.id}" ${tab ? '' : 'disabled'}>New chat</button>
-            <input type="checkbox" class="switch" data-action="toggle-provider" data-pid="${p.id}" ${enabled ? 'checked' : ''} title="Enable ${esc(p.label)}" />
-          </div>
-          <div class="probe" hidden></div>
-        </div>`;
-    }).join('');
-  }
-
+  // ------------------------------------------------------------------ shared helpers
   function chatName(chatId) {
     if (!chatId) return '';
     return state.convs[chatId]?.name || chatId;
@@ -679,59 +633,6 @@
     const el = document.activeElement;
     return !!(el && el.closest && el.closest('#sheetBody') && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName));
   }
-
-  async function providerTab(pid) {
-    const p = providerById(pid);
-    if (!p) return null;
-    const tabs = await chrome.tabs.query({ url: p.matches });
-    return tabs[0] || null;
-  }
-
-  const providerList = $('providerList');
-  providerList.addEventListener('click', async (e) => {
-    const action = e.target.closest('[data-action]')?.dataset.action;
-    if (action === 'test-provider') {
-      const pid = e.target.closest('[data-pid]').dataset.pid;
-      const row = e.target.closest('.provider');
-      const probe = row.querySelector('.probe');
-      probe.hidden = false;
-      probe.textContent = 'Testing…';
-      const tab = await providerTab(pid);
-      if (!tab) {
-        probe.textContent = 'No open tab. Open the provider, log in, then test again.';
-        return;
-      }
-      try {
-        const res = await chrome.tabs.sendMessage(tab.id, { type: 'wa2:ai-probe' });
-        probe.textContent = res?.ok
-          ? `OK · composer <${res.composer}> · send button: ${res.sendButton ? 'yes' : 'no'} · responses: ${res.responses}`
-          : `Adapter loaded but no composer matched. Check the selectors / UI version. (${res?.url || ''})`;
-      } catch (err) {
-        probe.textContent = 'Adapter not reachable — reload that tab after installing the extension.';
-      }
-    }
-    if (action === 'new-chat') {
-      const pid = e.target.closest('[data-pid]').dataset.pid;
-      const tab = await providerTab(pid);
-      if (!tab) return toast('No tab open');
-      try {
-        const res = await chrome.tabs.sendMessage(tab.id, { type: 'wa2:ai-new-chat' });
-        toast(res?.ok ? 'New chat started' : `Could not start a new chat: ${res?.error || 'button not found'}`);
-      } catch {
-        toast('Tab unreachable — reload it');
-      }
-    }
-  });
-
-  providerList.addEventListener('change', (e) => {
-    const input = e.target.closest('[data-action="toggle-provider"]');
-    if (!input) return;
-    const pid = input.dataset.pid;
-    const enabledProviders = { ...state.settings.enabledProviders, [pid]: input.checked };
-    saveSettings({ enabledProviders });
-    if (!input.checked && state.settings.aiProvider === pid) saveSettings({ aiProvider: 'auto' });
-    toast(`${providerById(pid)?.label || pid} ${input.checked ? 'enabled' : 'disabled'}`);
-  });
 
   // ------------------------------------------------------------------ conversations
   function effectiveReply(conv) {
@@ -765,18 +666,6 @@
         return true;
       })
       .sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0));
-  }
-
-  function providerOptions(selected) {
-    return (
-      '<option value="auto">Auto</option>' +
-      PROVIDERS.map(
-        (p) =>
-          `<option value="${p.id}" ${selected === p.id ? 'selected' : ''}>${esc(p.label)}${
-            state.settings.enabledProviders[p.id] ? '' : ' (off)'
-          }</option>`
-      ).join('')
-    );
   }
 
   function renderConvs() {
@@ -905,12 +794,23 @@
     if (!tabs.length) {
       text = 'WhatsApp closed';
       cls = 'bad';
-    } else if (state.status.mainReady) {
-      text = 'Listening';
-      cls = 'ok';
     } else {
-      text = 'Connecting…';
-      cls = 'warn';
+      try {
+        const res = await chrome.tabs.sendMessage(tabs[0].id, { type: 'wa2:ping' });
+        if (res && res.mainReady) {
+          text = 'Listening';
+          cls = 'ok';
+        } else if (res && res.reason === 'main-world-not-responding') {
+          text = 'Reload WhatsApp Web tab';
+          cls = 'bad';
+        } else {
+          text = 'Connecting…';
+          cls = 'warn';
+        }
+      } catch {
+        text = 'Reload WhatsApp Web tab';
+        cls = 'bad';
+      }
     }
     if (!state.settings.enabled) {
       text += ' · off';
@@ -955,31 +855,7 @@
     $('sheetId').textContent = `${chatId} · ${kind}`;
 
     const settings = state.settings;
-    const showAi = settings.replyMode === 'ai';
-    const chat = { id: chatId, name: conv.name, kind };
-    const delta = buildPrompt({
-      settings,
-      conv,
-      chat,
-      message: 'Their next message',
-      mode: 'delta',
-      summary: '',
-      ownerName: settings.ownerName || 'me',
-      turnId: 'estimate',
-    });
-    const full = buildPrompt({
-      settings,
-      conv,
-      chat,
-      message: 'Their next message',
-      mode: 'full',
-      summary: conv.summary || '',
-      ownerName: settings.ownerName || 'me',
-      turnId: 'estimate',
-    });
-
     const turns = (conv.turns || []).slice(-14);
-    const summarySource = conv.summarySource === 'ai' ? 'AI' : conv.summarySource === 'extractive' ? 'extractive' : '';
 
     $('sheetBody').innerHTML = `
       <div class="detail-stats">
@@ -1009,11 +885,6 @@
         </label>
       </div>
 
-      ${showAi ? `<label class="field">
-        <span class="label">AI provider</span>
-        <select data-action="sheet-provider">${providerOptions(o.provider || 'auto')}</select>
-      </label>` : ''}
-
       <div class="two">
         <label class="field">
           <span class="label">Delay min (s)</span>
@@ -1031,17 +902,11 @@
         <h3 style="margin:0;font-size:13px">Conversation summary</h3>
         <div class="btnrow" style="margin:0">
           <button class="btn tiny" type="button" data-action="sheet-summarize">Regenerate</button>
-          ${showAi && settings.summaryMode === 'ai' ? '<button class="btn tiny" type="button" data-action="sheet-summarize-ai">AI summary</button>' : ''}
         </div>
       </div>
       <div class="summary-box ${conv.summary ? '' : 'empty'}">${esc(
         conv.summary || 'No summary yet — it is rebuilt automatically as the conversation grows.'
       )}</div>
-      ${showAi ? `<div class="token-line">
-        <span>Next reply prompt: <b>~${delta.tokens}</b> tokens (delta)</span>
-        <span><b>~${full.tokens}</b> tokens (full)</span>
-        ${summarySource ? `<span>Summary: ${summarySource}</span>` : ''}
-      </div>` : ''}
 
       <h3 style="font-size:13px;margin:16px 0 4px">Recent turns</h3>
       <div>${turns.length ? turns.map((t) => `
@@ -1063,20 +928,14 @@
     if (!btn || !state.activeChat) return;
     const chatId = state.activeChat;
     const action = btn.dataset.action;
-    if (action === 'sheet-summarize' || action === 'sheet-summarize-ai') {
+    if (action === 'sheet-summarize') {
       btn.disabled = true;
-      toast(action === 'sheet-summarize-ai' ? 'Asking the provider for a summary…' : 'Rebuilding summary…');
-      const res = await chrome.runtime.sendMessage({
-        type: 'wa2:dashboard:summarize',
-        chatId,
-        useAi: action === 'sheet-summarize-ai',
-      });
+      toast('Rebuilding summary…');
+      await chrome.runtime.sendMessage({ type: 'wa2:dashboard:summarize', chatId });
       await loadLocal();
       renderConvs();
       renderSheet(chatId);
-      if (res?.ai) toast('AI summary requested — it appears in a moment');
-      else if (res?.reason === 'provider-not-on-this-chat') toast('Open this chat in a provider tab first, then try again');
-      else toast('Summary rebuilt');
+      toast('Summary rebuilt');
     }
     if (action === 'sheet-cancel') {
       await chrome.runtime.sendMessage({ type: 'wa2:dashboard:cancel-queue', chatId });
@@ -1112,10 +971,6 @@
         await saveOverride(chatId, { kind: el.value });
         toast('Chat type updated');
         break;
-      case 'sheet-provider':
-        await saveOverride(chatId, { provider: el.value });
-        toast('Provider updated');
-        break;
       case 'sheet-delay-min':
       case 'sheet-delay-max': {
         const key = el.dataset.action === 'sheet-delay-min' ? 'delayMinMs' : 'delayMaxMs';
@@ -1142,7 +997,7 @@
   $('openLogs').addEventListener('click', () => chrome.tabs.create({ url: chrome.runtime.getURL('logs/logs.html') }));
 
   $('openDashboardHelp').addEventListener('click', () => {
-    toast('Delta mode = new message only; Hybrid = delta + periodic full re-anchor; Full = summary + recent turns every message.', 6500);
+    toast('Fixed sends one reply to every allowed chat; Bot answers keyword matches. Per-chat switches always win. AI replies are coming soon.', 6500);
   });
 
   $('clearData').addEventListener('click', async () => {
@@ -1153,16 +1008,6 @@
     renderHints();
     if (state.activeChat) closeSheet();
     toast('Conversation data cleared');
-  });
-
-  $('copyManual').addEventListener('click', async () => {
-    if (!state.manualPrompt) return;
-    await navigator.clipboard.writeText(state.manualPrompt.prompt || '');
-    toast('Prompt copied — paste it into the provider tab, then Capture');
-  });
-  $('captureManual').addEventListener('click', async () => {
-    const res = await chrome.runtime.sendMessage({ type: 'wa2:dashboard:capture' });
-    toast(res?.ok ? 'Capturing the latest response…' : `Could not capture: ${res?.error || 'no prompt pending'}`);
   });
 
   // ------------------------------------------------------------------ live updates
@@ -1178,7 +1023,6 @@
       renderBotEditorActions();
     }
     if (editingWas && !state.bots.some((b) => b.id === editingWas)) resetBotEditor();
-    if (state.activeTab === 'ai') renderAiPanel();
     if (state.activeChat && !isEditingSheet()) renderSheet(state.activeChat);
   }
 
@@ -1191,10 +1035,8 @@
         applySettingsToInputs();
         renderMode();
         renderHints();
-        renderProviders();
         renderConvs();
         renderConnection();
-        if (state.activeTab === 'ai') renderAiPanel();
       }, 200);
       return;
     }
@@ -1221,7 +1063,6 @@
     applySettingsToInputs();
     renderMode();
     renderHints();
-    renderProviders();
     renderConvs();
     renderQueue();
     await renderConnection();

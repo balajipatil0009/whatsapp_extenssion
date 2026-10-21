@@ -161,7 +161,12 @@
       setTimeout(() => {
         if (pendingPings.has(reqId)) {
           pendingPings.delete(reqId);
-          sendResponse(lastStatus || { ok: false, reason: 'main-world-not-responding' });
+          sendResponse({
+            ...(lastStatus || {}),
+            ok: false,
+            mainReady: false,
+            reason: 'main-world-not-responding',
+          });
         }
       }, 900);
       window.dispatchEvent(new CustomEvent('wa2-bridge-request', { detail: { reqId, type: 'ping' } }));

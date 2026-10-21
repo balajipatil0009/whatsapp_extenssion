@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const { PROVIDERS, PROVIDER_IDS, providerById, normalizeSettings } = window.WA2;
+  const { normalizeSettings } = window.WA2;
   const $ = (id) => document.getElementById(id);
   let settings = normalizeSettings({});
 
@@ -17,18 +17,10 @@
     const mode = settings.replyMode;
     document.querySelectorAll('#modeSwitch button').forEach((b) => {
       b.classList.toggle('active', b.dataset.mode === mode);
-      if (b.dataset.mode === 'ai') b.disabled = true; // configuration coming soon
     });
     $('fixedBox').hidden = mode !== 'fixed';
     $('botBox').hidden = mode !== 'bot';
     $('aiBox').hidden = mode !== 'ai';
-
-    const enabled = PROVIDER_IDS.filter((id) => settings.enabledProviders[id]);
-    const select = $('provider');
-    select.innerHTML =
-      '<option value="auto">Auto (round-robin)</option>' +
-      enabled.map((id) => `<option value="${id}">${providerById(id)?.label || id}</option>`).join('');
-    select.value = settings.aiProvider;
 
     $('delayLine').textContent = `${(settings.replyDelayMinMs / 1000).toFixed(0)}–${(settings.replyDelayMaxMs / 1000).toFixed(0)}s delay`;
     $('version').textContent = `v${chrome.runtime.getManifest().version}`;
@@ -67,6 +59,9 @@
         if (res && res.mainReady) {
           statusEl.textContent = settings.enabled ? 'Listening ✓' : 'Off · connected';
           statusEl.className = settings.enabled ? 'status ok' : 'status';
+        } else if (res && res.reason === 'main-world-not-responding') {
+          statusEl.textContent = 'Reload WhatsApp Web tab';
+          statusEl.className = 'status bad';
         } else {
           statusEl.textContent = 'Connecting…';
           statusEl.className = 'status warn';
@@ -75,22 +70,6 @@
         statusEl.textContent = 'Reload WhatsApp Web tab';
         statusEl.className = 'status bad';
       }
-    }
-
-    if (settings.replyMode === 'ai') {
-      let open = 0;
-      for (const p of PROVIDERS) {
-        if (!settings.enabledProviders[p.id]) continue;
-        try {
-          const t = await chrome.tabs.query({ url: p.matches });
-          if (t.length) open += 1;
-        } catch {
-          /* ignore */
-        }
-      }
-      $('providerHint').textContent = open
-        ? `${open} enabled provider tab${open > 1 ? 's' : ''} open.`
-        : 'No enabled provider tab is open.';
     }
   }
 
@@ -123,8 +102,6 @@
     const value = e.target.value;
     textTimer = setTimeout(() => save({ replyText: value }), 450);
   });
-
-  $('provider').addEventListener('change', (e) => save({ aiProvider: e.target.value }));
 
   $('openDashboard').addEventListener('click', () => {
     const tab = settings.replyMode === 'bot' ? 'bot' : settings.replyMode === 'ai' ? 'ai' : 'common';

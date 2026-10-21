@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WA Auto Reply — Legacy AI page (retained)</title>
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+  <!--
+    LEGACY AI PAGE — kept as-is.
+    This markup used to be the "AI" tab inside dashboard.html. The tab was
+    replaced with a coming-soon page in a later release, so the old configuration UI
+    (manual prompt, AI config, context & memory, provider list) is preserved here
+    untouched for a future release.
+    This file is not loaded by the extension.
+  -->
+
+  <!-- ================================================================ AI -->
+  <div class="pane" data-pane="ai" hidden>
+    <article class="coming-soon card">
+      <div class="soon-icon">AI</div>
+      <div>
+        <h2>AI replies are coming soon</h2>
+        <p>
+          The provider engine is kept in the code, and existing AI setups keep working. Its configuration
+          screen is paused while bot replies are the focus.
+        </p>
+        <p class="muted" id="aiStatusLine">Checking providers…</p>
+      </div>
+    </article>
+
+    <details id="manualBox" class="manual card" hidden>
+      <summary>Manual prompt ready (legacy AI)</summary>
+      <pre id="manualPrompt"></pre>
+      <div class="btnrow">
+        <button id="copyManual" class="btn" type="button">Copy prompt</button>
+        <button id="captureManual" class="btn primary" type="button">Capture response</button>
+      </div>
+    </details>
+
+    <fieldset id="aiConfigFieldset" class="disabled-fieldset" disabled>
+      <article class="card">
+        <header class="card-head">
+          <h2>AI configuration</h2>
+          <span class="muted">read-only preview</span>
+        </header>
+        <div class="two">
+          <label class="field">
+            <span class="label">Provider</span>
+            <select id="aiProvider">
+              <option value="auto">Auto (round-robin)</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="label">Your name (optional)</span>
+            <input type="text" id="ownerName" maxlength="40" placeholder="e.g. Aarav" />
+          </label>
+        </div>
+        <label class="field">
+          <span class="label">Persona &amp; rules</span>
+          <textarea id="aiPersona" rows="2" maxlength="400"></textarea>
+        </label>
+        <details class="advanced">
+          <summary>Custom prompt template</summary>
+          <p class="hint">Placeholders: <code>{{message}}</code>, <code>{{summary}}</code>, <code>{{recent}}</code>, <code>{{name}}</code>, <code>{{kind}}</code>, <code>{{owner}}</code>.</p>
+          <textarea id="aiPrompt" rows="5" maxlength="3000" placeholder="Leave empty for the built-in prompt…"></textarea>
+        </details>
+        <label class="row small">
+          <span>Feed prompts manually (no auto-send)</span>
+          <input type="checkbox" id="aiManual" class="switch" />
+        </label>
+      </article>
+
+      <article class="card">
+        <header class="card-head"><h2>Context &amp; memory</h2></header>
+        <label class="field">
+          <span class="label">Context mode</span>
+          <select id="contextMode">
+            <option value="delta">Delta — leanest, provider chat keeps history</option>
+            <option value="hybrid">Hybrid — delta + periodic re-anchor (recommended)</option>
+            <option value="full">Full — summary + recent turns every message</option>
+          </select>
+        </label>
+        <p class="hint" id="contextHint"></p>
+        <div class="two">
+          <label class="field">
+            <span class="label">Recent turns (full mode)</span>
+            <input type="number" id="recentTurns" min="0" max="20" step="1" />
+          </label>
+          <label class="field">
+            <span class="label">Re-anchor every N turns</span>
+            <input type="number" id="anchorEveryTurns" min="1" max="200" step="1" />
+          </label>
+        </div>
+        <div class="two">
+          <label class="field">
+            <span class="label">Summaries</span>
+            <select id="summaryMode">
+              <option value="off">Off</option>
+              <option value="extractive">Extractive (free, local)</option>
+              <option value="ai">Extractive + AI on demand</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="label">Refresh every N turns</span>
+            <input type="number" id="summaryEveryTurns" min="2" max="100" step="1" />
+          </label>
+        </div>
+        <div class="statline">
+          <span><b id="convCount">0</b> conversations</span>
+          <span><b id="summaryCount">0</b> summaries</span>
+        </div>
+      </article>
+
+      <article class="card">
+        <header class="card-head">
+          <h2>AI providers</h2>
+          <span class="muted">one tab each</span>
+        </header>
+        <div id="providerList" class="providers"></div>
+        <p class="hint">Kept for the returning AI configuration. Provider tabs and round-robin code remain active.</p>
+      </article>
+    </fieldset>
+  </div>
+</body>
+</html>

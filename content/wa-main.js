@@ -367,6 +367,7 @@
       chatName: detail.chatName || '',
       text: String(detail.text),
       dueAt: Date.now() + delay,
+      enqueuedAt: Date.now(),
       status: 'pending',
       attempts: 0,
       typing: detail.typing !== false,
@@ -477,23 +478,31 @@
     const waitForGap = lastSendAt + gap - Date.now();
     if (waitForGap > 0) await sleep(waitForGap);
 
+    // The configured delay is done at this point. Read → typing → send.
+    const waited = item.enqueuedAt ? Date.now() - item.enqueuedAt : 0;
+    log('info', 'queue', `Delay complete after ${waited}ms → ${item.chatId}: marking read, then typing`);
+
     if (item.markSeen && settings.markSeen) await markSeen(item.chatId);
 
     if (item.typing && settings.typingSimulation) {
       const typingMs = typingDurationFor(item.text);
       const ok = await startTyping(item.chatId, typingMs + 1000);
-      if (ok) {
-        log('info', 'presence', `Typing… ${typingMs}ms → ${item.chatId}`);
-        await sleep(typingMs);
-        await stopTyping(item.chatId);
-      }
+      if (ok) log('info', 'presence', `Typing… ${typingMs}ms → ${item.chatId}`);
+      else log('warn', 'presence', `Typing presence unavailable for ${item.chatId}; waiting ${typingMs}ms anyway`);
+      // Presence is cosmetic — always keep the human pacing even if the API
+      // refuses to show "typing…".
+      await sleep(typingMs);
+      if (ok) await stopTyping(item.chatId);
     }
 
     // A short, human "hit send" hesitation.
     await sleep(randomBetween(250, 900));
 
     try {
-      const result = await window.WPP.chat.sendTextMessage(item.chatId, item.text);
+      // wa-js marks the chat read by default; honour our setting explicitly.
+      const result = await window.WPP.chat.sendTextMessage(item.chatId, item.text, {
+        markIsRead: !!settings.markSeen,
+      });
       lastSendAt = Date.now();
       const id = serializedValue(result?.id) || 'ok';
       log('info', 'send', `✔ ${item.chatId} in ${Date.now() - started}ms (msg ${id})`);

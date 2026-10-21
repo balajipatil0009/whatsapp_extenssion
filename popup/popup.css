@@ -177,6 +177,16 @@ button.ghost { background: var(--card); color: var(--text); }
 button.ghost:hover { background: var(--line); }
 
 .hint { font-size: 11px; color: var(--muted); line-height: 1.45; margin: 0 0 8px; }
+.soon-note {
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  background: var(--card);
+  padding: 9px 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.soon-note strong { display: block; margin-bottom: 3px; }
+.soon-note .hint { margin: 0; }
 footer {
   margin-top: 8px;
   padding-top: 8px;
